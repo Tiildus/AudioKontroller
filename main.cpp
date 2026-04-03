@@ -1,4 +1,4 @@
-#include "MidiHandler.h"
+#include "PCPanelHandler.h"
 #include "AudioHandler.h"
 #include "Overlay.h"
 #include "WindowUtils.h"
@@ -8,11 +8,11 @@ int main(int argc, char *argv[]) {
     Overlay overlay;
     AudioHandler audio;
     ButtonHandler button;
-    MidiHandler midi("Midi Through Port-0");
+    PCPanelHandler panel(PCPanelDevice::Mini);
 
-    // --- Volume Controls ---
-    midi.setCallback([&](int cc, float vol) {
-        switch (cc) {
+    // --- Volume Controls (knob indices 0-3, values 0.0-1.0) ---
+    panel.setCallback([&](int knob, float vol) {
+        switch (knob) {
             case 0: audio.setVolumeForApp("spotify", vol); break;
             case 1: audio.setVolumeForApp("firefox", vol); break;
             case 2: audio.setVolumeForApp("discord", vol); break;
@@ -21,9 +21,9 @@ int main(int argc, char *argv[]) {
         overlay.showVolume(vol);
     });
 
-    // --- Button Controls ---
-    midi.setButtonCallback([&](int note) {
-        switch (note) {
+    // --- Button Controls (button indices 0-3) ---
+    panel.setButtonCallback([&](int btn) {
+        switch (btn) {
             case 0: button.toggleMediaPlayPause(); break;
             case 1: button.sendKeySequence({"type", "Hello World"}); break; //must be formated for wtype
             case 2: button.forceCloseFocusedWindow(); break;
@@ -31,5 +31,5 @@ int main(int argc, char *argv[]) {
         }
     });
 
-    midi.startListening();
+    panel.startListening();
 }
