@@ -1,0 +1,17 @@
+{
+    "device": "Mini",
+    "knobThreshold": 4,
+    "logFile": "audiokontroller.log",
+    "knobs": [
+        { "type": "app", "target": "spotify" },
+        { "type": "app", "target": "firefox" },
+        { "type": "app", "target": "discord" },
+        { "type": "focused" }
+    ],
+    "buttons": [
+        { "action": "mediaPlayPause" },
+        { "action": "sendKeys", "args": ["type", "Hello World"] },
+        { "action": "forceClose" },
+        { "action": "none" }
+    ]
+}

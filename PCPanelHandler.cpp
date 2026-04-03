@@ -1,7 +1,9 @@
 #include "PCPanelHandler.h"
-#include <iostream>
+#include "Logger.h"
 #include <cstring>
 #include <cstdlib>
+#include <sstream>
+#include <iomanip>
 
 PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
     lastValue.fill(NO_VALUE);
@@ -12,13 +14,14 @@ PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
 
     device = hid_open(vid, pid, nullptr);
     if (!device) {
-        std::cerr << "[PCPanel] Failed to open device (VID=0x"
-                  << std::hex << vid << " PID=0x" << pid << ")\n";
+        std::ostringstream ss;
+        ss << "Failed to open device (VID=0x" << std::hex << vid << " PID=0x" << pid << ")";
+        Logger::instance().error("PCPanel", ss.str());
         return;
     }
 
     hid_set_nonblocking(device, 1);
-    std::cout << "[PCPanel] Connected to device\n";
+    Logger::instance().info("PCPanel", "Connected to device");
 }
 
 PCPanelHandler::~PCPanelHandler() {
@@ -39,7 +42,7 @@ void PCPanelHandler::setButtonCallback(ButtonCallback cb) {
 
 void PCPanelHandler::startListening() {
     if (!device) {
-        std::cerr << "[PCPanel] No device connected, cannot listen\n";
+        Logger::instance().error("PCPanel", "No device connected, cannot listen");
         return;
     }
 
@@ -67,7 +70,7 @@ void PCPanelHandler::readLoop() {
 
         if (bytesRead <= 0) continue;
 
-        // Skip initial reads while device stabilizes (matches Java implementation)
+        // Skip initial reads while device stabilizes
         if (skipCount < INIT_SKIP_READS) {
             skipCount++;
             continue;
@@ -82,7 +85,6 @@ void PCPanelHandler::readLoop() {
         if (type == INPUT_KNOB && callback) {
             if (index < MAX_KNOBS) {
                 int prev = lastValue[index];
-                // First read for this knob, or change exceeds threshold
                 if (prev == NO_VALUE || std::abs(value - prev) >= knobThreshold) {
                     lastValue[index] = value;
                     float normalized = value / 255.0f;
@@ -91,7 +93,6 @@ void PCPanelHandler::readLoop() {
             }
         }
         else if (type == INPUT_BUTTON && value == 1 && buttonCallback) {
-            // Only fire on press (value==1), not release (value==0)
             buttonCallback(index);
         }
     }

@@ -1,17 +1,21 @@
 #!/bin/bash
 set -e
 
-APP_NAME="MidiController"
-REPO_DIR="$(pwd)"               # assumes you're running this from the project root
+APP_NAME="AudioKontroller"
+DAEMON_NAME="audiokontrollerd"
+REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$REPO_DIR/build"
-INSTALL_BIN="$HOME/.local/bin/$APP_NAME"
+INSTALL_DIR="$HOME/.local/bin/$APP_NAME.d"
+INSTALL_BIN="$INSTALL_DIR/$DAEMON_NAME"
+INSTALL_CONFIG="$INSTALL_DIR/config.json"
+CLI_BIN="$HOME/.local/bin/$APP_NAME"
 SERVICE_DIR="$HOME/.config/systemd/user"
-SERVICE_FILE="$SERVICE_DIR/midicontroller.service"
+SERVICE_FILE="$SERVICE_DIR/audiokontroller.service"
 
-echo "🔧 Installing $APP_NAME on Fedora..."
+echo "Installing $APP_NAME..."
 
-# --- 1. Install Dependencies ---
-echo "📦 Installing required packages..."
+# --- Install Dependencies ---
+echo "Installing required packages..."
 sudo dnf install -y \
     cmake gcc-c++ \
     qt6-qtbase-devel qt6-qttools-devel \
@@ -20,17 +24,15 @@ sudo dnf install -y \
     pkgconf-pkg-config \
     playerctl ydotool kdotool
 
-# --- 2. Setup safe /dev/uinput permissions ---
-echo "🧩 Setting up udev rule for /dev/uinput (safe configuration)..."
+# --- uinput permissions ---
+echo "Setting up udev rules..."
 sudo groupadd -f uinput
 sudo usermod -aG uinput "$USER"
 
-# Create secure udev rule: group uinput, mode 0660
 echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | \
   sudo tee /etc/udev/rules.d/99-uinput.rules > /dev/null
 
 # --- PCPanel USB device permissions ---
-echo "🎛️ Setting up udev rules for PCPanel USB devices..."
 cat << 'PCPANEL_EOF' | sudo tee /etc/udev/rules.d/99-pcpanel.rules > /dev/null
 # PCPanel Mini (STM32)
 SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", MODE="0666"
@@ -48,10 +50,8 @@ PCPANEL_EOF
 sudo udevadm control --reload
 sudo udevadm trigger
 
-echo "✅ Udev rules installed. You must log out and back in after installation to apply group changes."
-
-# --- 3. Setup ydotool user service ---
-echo "⚙️ Setting up ydotool user service..."
+# --- ydotool daemon ---
+echo "Setting up ydotool service..."
 mkdir -p "$SERVICE_DIR"
 
 cat > "$SERVICE_DIR/ydotoold.service" << 'EOF'
@@ -70,54 +70,84 @@ EOF
 systemctl --user daemon-reload
 systemctl --user enable --now ydotoold.service || true
 
-# --- 4. Build the application ---
-echo "🏗️ Building $APP_NAME..."
+# --- Build ---
+echo "Building $APP_NAME..."
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 cmake ..
 make -j"$(nproc)"
 
-# --- 5. Install binary into ~/.local/bin ---
-echo "📂 Installing binary to ~/.local/bin/"
-mkdir -p "$HOME/.local/bin"
-cp "$BUILD_DIR/$APP_NAME" "$INSTALL_BIN"
+# --- Install ---
+echo "Installing to $INSTALL_DIR/"
+mkdir -p "$INSTALL_DIR"
+cp "$BUILD_DIR/$DAEMON_NAME" "$INSTALL_BIN"
 chmod +x "$INSTALL_BIN"
 
-# --- 6. Create user systemd service ---
-echo "🧩 Creating user service at $SERVICE_FILE"
+if [ ! -f "$INSTALL_CONFIG" ]; then
+    cp "$REPO_DIR/config.json" "$INSTALL_CONFIG"
+    echo "Config copied to $INSTALL_CONFIG"
+else
+    echo "Config already exists at $INSTALL_CONFIG -- skipping"
+fi
+
+# --- CLI wrapper ---
+echo "Installing CLI wrapper to $HOME/.local/bin/"
+cat > "$HOME/.local/bin/AudioKontroller" << 'WRAPPER_EOF'
+#!/bin/bash
+INSTALL_DIR="$HOME/.local/bin/AudioKontroller.d"
+SERVICE="audiokontroller.service"
+CONFIG="$INSTALL_DIR/config.json"
+LOG="$INSTALL_DIR/audiokontroller.log"
+
+case "$1" in
+    start)   systemctl --user start "$SERVICE" ;;
+    stop)    systemctl --user stop "$SERVICE" ;;
+    restart) systemctl --user restart "$SERVICE" ;;
+    status)  systemctl --user status "$SERVICE" ;;
+    config)  ${EDITOR:-nano} "$CONFIG" ;;
+    log)     less +G "$LOG" ;;
+    *)
+        echo "Usage: AudioKontroller {start|stop|restart|status|config|log}"
+        exit 1
+        ;;
+esac
+WRAPPER_EOF
+chmod +x "$HOME/.local/bin/AudioKontroller"
+
+# --- systemd service ---
+echo "Creating user service..."
 cat > "$SERVICE_FILE" << EOF
 [Unit]
-Description=MIDI Controller background service
+Description=AudioKontroller background service
 After=graphical-session.target ydotoold.service
 
 [Service]
 Type=simple
+WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_BIN
 Restart=on-failure
 RestartSec=3
-StandardOutput=append:%h/.local/share/midicontroller.log
-StandardError=append:%h/.local/share/midicontroller.err
 
 [Install]
 WantedBy=default.target
 EOF
 
-# --- 7. Enable & start service ---
-echo "🚀 Enabling and starting $APP_NAME service..."
 systemctl --user daemon-reload
-systemctl --user enable --now midicontroller.service || true
+systemctl --user enable --now audiokontroller.service || true
 
-# --- 8. Verify setup ---
+# --- Done ---
 echo
-echo "✅ Installation complete!"
-echo "📍 Binary: $INSTALL_BIN"
-echo "🧠 Service file: $SERVICE_FILE"
+echo "Installation complete!"
+echo "  Install directory : $INSTALL_DIR/"
+echo "  Service file      : $SERVICE_FILE"
+echo "  CLI wrapper       : $HOME/.local/bin/AudioKontroller"
 echo
-echo "You can control the service manually with:"
-echo "   systemctl --user start midicontroller.service"
-echo "   systemctl --user stop midicontroller.service"
-echo "   systemctl --user restart midicontroller.service"
-echo "   systemctl --user status midicontroller.service"
+echo "Usage:"
+echo "  AudioKontroller start    - start the service"
+echo "  AudioKontroller stop     - stop the service"
+echo "  AudioKontroller restart  - restart the service"
+echo "  AudioKontroller status   - check service status"
+echo "  AudioKontroller config   - edit config file"
+echo "  AudioKontroller log      - view log file"
 echo
-echo "⚠️ IMPORTANT: Log out and back in now to apply the new 'uinput' group permissions."
-echo "🎉 $APP_NAME will then start automatically on login and run in the background."
+echo "IMPORTANT: Log out and back in to apply uinput group permissions."

@@ -1,13 +1,13 @@
 #include "ButtonHandler.h"
 #include "WindowUtils.h"
+#include "Logger.h"
 #include <cstdlib>
-#include <iostream>
 #include <thread>
 #include <chrono>
 
 void ButtonHandler::toggleMediaPlayPause() {
     std::system("playerctl play-pause &");
-    std::cout << "[ButtonHandler] Toggled Play/Pause via playerctl\n";
+    Logger::instance().info("ButtonHandler", "Toggled Play/Pause via playerctl");
 }
 
 void ButtonHandler::sendKeySequence(const std::vector<std::string>& args) {
@@ -27,18 +27,17 @@ void ButtonHandler::sendKeySequence(const std::vector<std::string>& args) {
     // Execute command
     int result = std::system(cmd.c_str());
 
-    std::cout << "[ButtonHandler] Executed: " << cmd
-    << " (exit code " << result << ")\n";
+    Logger::instance().info("ButtonHandler", "Executed: " + cmd + " (exit code " + std::to_string(result) + ")");
 }
 
 void ButtonHandler::forceCloseFocusedWindow() {
     int pid = getFocusedWindowPID();
     if (pid > 0) {
         std::system(("kill -15 " + std::to_string(pid)).c_str());
-        std::this_thread::sleep_for(std::chrono::milliseconds(300));
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         std::system(("kill -9 " + std::to_string(pid)).c_str());
-        std::cout << "[ButtonHandler] Forced closed PID: " << pid << "\n";
+        Logger::instance().info("ButtonHandler", "Forced closed PID: " + std::to_string(pid));
     } else {
-        std::cout << "[ButtonHandler] No focused PID found, unable to close\n";
+        Logger::instance().warn("ButtonHandler", "No focused PID found, unable to close");
     }
 }

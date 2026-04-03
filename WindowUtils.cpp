@@ -1,7 +1,5 @@
 #include "WindowUtils.h"
 #include <cstdlib>
-//#include <iostream>
-//#include <QDBusInterface>
 
 int getFocusedWindowPID() {
     FILE* pipe = popen("kdotool getactivewindow getwindowpid", "r");
@@ -18,13 +16,3 @@ int getFocusedWindowPID() {
         return -1;
     }
 }
-
-/*
-int getFocusedWindowPID() {
-    QDBusInterface iface("org.kde.KWin", "/KWin", "org.kde.KWin");
-    QDBusMessage reply = iface.call("activeWindowPid");
-    if (reply.type() == QDBusMessage::ReplyMessage && !reply.arguments().isEmpty())
-        return reply.arguments().first().toInt();
-    return -1;
-}
-*/
