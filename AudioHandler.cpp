@@ -85,8 +85,8 @@ void AudioHandler::requestSinkInputs() {
 // determines whether it matches the configured target (by name or PID),
 // and applies the configured volume if requested.
 void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* info, int eol, void* userdata) {
-    // PulseAudio signals end-of-list with eol > 0
-    if (eol > 0) return;
+    // eol > 0 = normal end-of-list, eol < 0 = error (info is NULL in both cases)
+    if (eol != 0 || !info) return;
 
     auto* handler = static_cast<AudioHandler*>(userdata);
     const pa_proplist* props = info->proplist;

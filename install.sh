@@ -16,7 +16,7 @@ sudo dnf install -y \
     cmake gcc-c++ \
     qt6-qtbase-devel qt6-qttools-devel \
     pulseaudio-libs-devel \
-    rtmidi-devel \
+    hidapi-devel \
     pkgconf-pkg-config \
     playerctl ydotool kdotool
 
@@ -29,10 +29,26 @@ sudo usermod -aG uinput "$USER"
 echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | \
   sudo tee /etc/udev/rules.d/99-uinput.rules > /dev/null
 
+# --- PCPanel USB device permissions ---
+echo "🎛️ Setting up udev rules for PCPanel USB devices..."
+cat << 'PCPANEL_EOF' | sudo tee /etc/udev/rules.d/99-pcpanel.rules > /dev/null
+# PCPanel Mini (STM32)
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", MODE="0666"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c4", MODE="0666"
+
+# PCPanel Pro (STM32)
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c5", MODE="0666"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c5", MODE="0666"
+
+# PCPanel RGB (Microchip)
+SUBSYSTEM=="usb", ATTR{idVendor}=="04d8", ATTR{idProduct}=="eb42", MODE="0666"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="eb42", MODE="0666"
+PCPANEL_EOF
+
 sudo udevadm control --reload
 sudo udevadm trigger
 
-echo "✅ Udev rule installed. You must log out and back in after installation to apply group changes."
+echo "✅ Udev rules installed. You must log out and back in after installation to apply group changes."
 
 # --- 3. Setup ydotool user service ---
 echo "⚙️ Setting up ydotool user service..."
