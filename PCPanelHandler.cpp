@@ -1,8 +1,10 @@
 #include "PCPanelHandler.h"
 #include <iostream>
 #include <cstring>
+#include <cstdlib>
 
 PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
+    lastValue.fill(NO_VALUE);
     hid_init();
 
     uint16_t vid, pid;
@@ -78,9 +80,15 @@ void PCPanelHandler::readLoop() {
         uint8_t value = buf[2];
 
         if (type == INPUT_KNOB && callback) {
-            // PCPanel sends 0-255, normalize to 0.0-1.0
-            float normalized = value / 255.0f;
-            callback(index, normalized);
+            if (index < MAX_KNOBS) {
+                int prev = lastValue[index];
+                // First read for this knob, or change exceeds threshold
+                if (prev == NO_VALUE || std::abs(value - prev) >= knobThreshold) {
+                    lastValue[index] = value;
+                    float normalized = value / 255.0f;
+                    callback(index, normalized);
+                }
+            }
         }
         else if (type == INPUT_BUTTON && value == 1 && buttonCallback) {
             // Only fire on press (value==1), not release (value==0)
