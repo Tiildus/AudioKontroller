@@ -34,6 +34,10 @@ echo "Setting up udev rules..."
 echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | \
     sudo tee /etc/udev/rules.d/99-uinput.rules > /dev/null
 
+<<<<<<< HEAD
+=======
+# --- PCPanel USB device permissions (group-restricted, not world-writable) ---
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 cat << 'PCPANEL_EOF' | sudo tee /etc/udev/rules.d/99-pcpanel.rules > /dev/null
 # PCPanel Mini (STM32)
 SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", GROUP="uinput", MODE="0660"
@@ -120,8 +124,12 @@ esac
 WRAPPER_EOF
 chmod +x "$HOME/.local/bin/AudioKontroller"
 
+<<<<<<< HEAD
 # --- systemd service ---
 # Overwriting and reloading is idempotent.
+=======
+# --- systemd service (with security hardening) ---
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 echo "Creating user service..."
 cat > "$SERVICE_FILE" << EOF
 [Unit]

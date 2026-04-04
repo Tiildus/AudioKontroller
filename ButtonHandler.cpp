@@ -4,8 +4,13 @@
 
 #include "ButtonHandler.h"
 #include "Logger.h"
+<<<<<<< HEAD
 #include <unistd.h>   // fork, execvp, _exit
 #include <signal.h>   // kill, SIGTERM, SIGKILL
+=======
+#include <unistd.h>
+#include <signal.h>
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 #include <thread>
 #include <chrono>
 #include <sstream>
@@ -122,6 +127,19 @@ void ButtonHandler::handleButton(const ButtonConfig& bc) {
     // "none" action intentionally does nothing
 }
 
+void ButtonHandler::forkExec(const std::vector<std::string>& argv) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child: build null-terminated argv array and exec
+        std::vector<const char*> args;
+        for (const auto& a : argv) args.push_back(a.c_str());
+        args.push_back(nullptr);
+        execvp(args[0], const_cast<char* const*>(args.data()));
+        _exit(127); // exec failed
+    }
+    // Parent returns immediately. SA_NOCLDWAIT in main prevents zombies.
+}
+
 void ButtonHandler::toggleMediaPlayPause() {
     forkExec({"playerctl", "play-pause"});
     Logger::instance().info("ButtonHandler", "Toggled Play/Pause");
@@ -200,14 +218,26 @@ void ButtonHandler::forceCloseFocusedWindow() {
         return;
     }
 
+<<<<<<< HEAD
     std::thread([pid]() {
         kill(pid, SIGTERM);
         std::this_thread::sleep_for(std::chrono::milliseconds(1000));
         // kill(pid, 0) doesn't send a signal; it just checks if the process
         // still exists. Returns 0 if it does, -1 if it's gone.
+=======
+    // Run kill sequence in a detached thread so HID loop is not blocked
+    std::thread([pid]() {
+        kill(pid, SIGTERM);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        // Only SIGKILL if process still exists
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
         if (kill(pid, 0) == 0) {
             kill(pid, SIGKILL);
         }
         Logger::instance().info("ButtonHandler", "Force closed PID: " + std::to_string(pid));
+<<<<<<< HEAD
     }).detach(); // detach so this thread cleans itself up when done
+=======
+    }).detach();
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 }

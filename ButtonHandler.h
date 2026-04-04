@@ -23,6 +23,7 @@ class ButtonHandler {
 public:
     ButtonHandler() = default;
 
+<<<<<<< HEAD
     // Injects a function that returns the focused window's PID.
     // Called from main.cpp with a lambda that reads FocusMonitor::getPID().
     void setGetPIDFunc(std::function<int()> func) { getPID = func; }
@@ -31,6 +32,11 @@ public:
     void handleButton(const ButtonConfig& bc);
 
     // Toggles media playback (uses playerctl).
+=======
+    // Set a function that returns the focused window PID (injected from main)
+    void setGetPIDFunc(std::function<int()> func) { getPID = func; }
+
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     void toggleMediaPlayPause();
 
     // Sends a key sequence using ydotool. "args" is passed directly as
@@ -47,6 +53,7 @@ public:
     void forceCloseFocusedWindow();
 
 private:
+<<<<<<< HEAD
     // Holds the injected PID-lookup function. May be empty if not set.
     std::function<int()> getPID;
 
@@ -58,4 +65,10 @@ private:
     // Maps human-readable key names (lowercase) to Linux input event keycodes.
     // These codes come from linux/input-event-codes.h and are what ydotool expects.
     static const std::unordered_map<std::string, int> keyMap;
+=======
+    std::function<int()> getPID;
+
+    // Fork + execvp, parent returns immediately (fire-and-forget)
+    static void forkExec(const std::vector<std::string>& argv);
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 };

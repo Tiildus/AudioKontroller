@@ -62,8 +62,11 @@ bool ConfigManager::load(const std::string& path) {
     return true;
 }
 
+<<<<<<< HEAD
 // Writes a config file with four knobs (Spotify, Firefox, Discord, focused)
 // and four buttons (play/pause, type text, force close, none) as a starting point.
+=======
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 bool ConfigManager::createDefault(const std::string& path) {
     QJsonObject root;
     root["device"]         = "Mini";
@@ -116,7 +119,11 @@ bool ConfigManager::createDefault(const std::string& path) {
         return false;
     }
     QJsonDocument doc(root);
+<<<<<<< HEAD
     file.write(doc.toJson(QJsonDocument::Indented)); // human-readable indented JSON
+=======
+    file.write(doc.toJson(QJsonDocument::Indented));
+>>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     file.close();
     return true;
 }
