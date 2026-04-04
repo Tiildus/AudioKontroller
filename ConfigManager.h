@@ -26,7 +26,7 @@ public:
     ConfigManager() = default;
 
     bool load(const std::string& path);
-    void createDefault(const std::string& path);
+    bool createDefault(const std::string& path);
     const Config& get() const { return config; }
 
 private:

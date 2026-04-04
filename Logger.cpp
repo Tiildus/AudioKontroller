@@ -26,7 +26,7 @@ void Logger::log(LogLevel level, const std::string& tag, const std::string& mess
     std::lock_guard<std::mutex> lock(mtx);
     if (initialized && file.is_open()) {
         file << timestamp() << " [" << levelStr(level) << "] [" << tag << "] " << message << "\n";
-        file.flush();
+        if (level >= LogLevel::WARN) file.flush();
     }
 }
 

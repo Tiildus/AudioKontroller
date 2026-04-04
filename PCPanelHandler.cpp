@@ -1,9 +1,10 @@
 #include "PCPanelHandler.h"
 #include "Logger.h"
 #include <cstring>
-#include <cstdlib>
 #include <sstream>
 #include <iomanip>
+#include <chrono>
+#include <thread>
 
 PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
     lastValue.fill(NO_VALUE);
@@ -25,7 +26,7 @@ PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
 }
 
 PCPanelHandler::~PCPanelHandler() {
-    running = false;
+    stopListening();
     if (device) {
         hid_close(device);
     }
@@ -40,14 +41,18 @@ void PCPanelHandler::setButtonCallback(ButtonCallback cb) {
     buttonCallback = cb;
 }
 
-void PCPanelHandler::startListening() {
+void PCPanelHandler::startListeningAsync() {
     if (!device) {
         Logger::instance().error("PCPanel", "No device connected, cannot listen");
         return;
     }
-
     running = true;
-    readLoop();
+    readThread = std::thread(&PCPanelHandler::readLoop, this);
+}
+
+void PCPanelHandler::stopListening() {
+    running = false;
+    if (readThread.joinable()) readThread.join();
 }
 
 void PCPanelHandler::getVidPid(PCPanelDevice type, uint16_t& vid, uint16_t& pid) {
@@ -64,11 +69,28 @@ void PCPanelHandler::getVidPid(PCPanelDevice type, uint16_t& vid, uint16_t& pid)
 void PCPanelHandler::readLoop() {
     unsigned char buf[HID_REPORT_SIZE];
     int skipCount = 0;
+    int consecutiveErrors = 0;
 
     while (running) {
         int bytesRead = hid_read_timeout(device, buf, HID_REPORT_SIZE, READ_TIMEOUT_MS);
 
-        if (bytesRead <= 0) continue;
+        if (bytesRead == 0) continue; // timeout, normal
+
+        if (bytesRead < 0) {
+            consecutiveErrors++;
+            if (consecutiveErrors == 1) {
+                Logger::instance().error("PCPanel", "HID read error, device may be disconnected");
+            }
+            if (consecutiveErrors >= 50) {
+                Logger::instance().error("PCPanel", "Too many HID errors, stopping");
+                running = false;
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(100));
+            continue;
+        }
+
+        consecutiveErrors = 0;
 
         // Skip initial reads while device stabilizes
         if (skipCount < INIT_SKIP_READS) {

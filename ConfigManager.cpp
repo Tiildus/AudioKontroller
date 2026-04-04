@@ -10,8 +10,14 @@ bool ConfigManager::load(const std::string& path) {
     if (!file.open(QIODevice::ReadOnly)) {
         std::cerr << "Config file not found: " << path << "\n";
         std::cerr << "Creating default config...\n";
-        createDefault(path);
-        file.open(QIODevice::ReadOnly);
+        if (!createDefault(path)) {
+            std::cerr << "Failed to create default config.\n";
+            return false;
+        }
+        if (!file.open(QIODevice::ReadOnly)) {
+            std::cerr << "Failed to open newly created config: " << path << "\n";
+            return false;
+        }
     }
 
     QJsonParseError err;
@@ -46,7 +52,7 @@ bool ConfigManager::load(const std::string& path) {
     return true;
 }
 
-void ConfigManager::createDefault(const std::string& path) {
+bool ConfigManager::createDefault(const std::string& path) {
     QJsonObject root;
     root["device"] = "Mini";
     root["knobThreshold"] = 4;
@@ -79,12 +85,14 @@ void ConfigManager::createDefault(const std::string& path) {
     root["buttons"] = buttons;
 
     QFile file(QString::fromStdString(path));
-    if (file.open(QIODevice::WriteOnly)) {
-        QJsonDocument doc(root);
-        file.write(doc.toJson(QJsonDocument::Indented));
-        file.close();
-        std::cout << "Default config created at: " << path << "\n";
+    if (!file.open(QIODevice::WriteOnly)) {
+        std::cerr << "Failed to write default config to: " << path << "\n";
+        return false;
     }
+    QJsonDocument doc(root);
+    file.write(doc.toJson(QJsonDocument::Indented));
+    file.close();
+    return true;
 }
 
 KnobConfig ConfigManager::parseKnob(const QJsonObject& obj) {

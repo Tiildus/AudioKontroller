@@ -8,7 +8,6 @@ BUILD_DIR="$REPO_DIR/build"
 INSTALL_DIR="$HOME/.local/bin/$APP_NAME.d"
 INSTALL_BIN="$INSTALL_DIR/$DAEMON_NAME"
 INSTALL_CONFIG="$INSTALL_DIR/config.json"
-CLI_BIN="$HOME/.local/bin/$APP_NAME"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/audiokontroller.service"
 
@@ -22,7 +21,7 @@ sudo dnf install -y \
     pulseaudio-libs-devel \
     hidapi-devel \
     pkgconf-pkg-config \
-    playerctl ydotool kdotool
+    playerctl ydotool
 
 # --- uinput permissions ---
 echo "Setting up udev rules..."
@@ -32,19 +31,19 @@ sudo usermod -aG uinput "$USER"
 echo 'KERNEL=="uinput", GROUP="uinput", MODE="0660", OPTIONS+="static_node=uinput"' | \
   sudo tee /etc/udev/rules.d/99-uinput.rules > /dev/null
 
-# --- PCPanel USB device permissions ---
+# --- PCPanel USB device permissions (group-restricted, not world-writable) ---
 cat << 'PCPANEL_EOF' | sudo tee /etc/udev/rules.d/99-pcpanel.rules > /dev/null
 # PCPanel Mini (STM32)
-SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c4", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", GROUP="uinput", MODE="0660"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c4", GROUP="uinput", MODE="0660"
 
 # PCPanel Pro (STM32)
-SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c5", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c5", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c5", GROUP="uinput", MODE="0660"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c5", GROUP="uinput", MODE="0660"
 
 # PCPanel RGB (Microchip)
-SUBSYSTEM=="usb", ATTR{idVendor}=="04d8", ATTR{idProduct}=="eb42", MODE="0666"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="eb42", MODE="0666"
+SUBSYSTEM=="usb", ATTR{idVendor}=="04d8", ATTR{idProduct}=="eb42", GROUP="uinput", MODE="0660"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="04d8", ATTRS{idProduct}=="eb42", GROUP="uinput", MODE="0660"
 PCPANEL_EOF
 
 sudo udevadm control --reload
@@ -62,6 +61,7 @@ After=graphical-session.target
 [Service]
 ExecStart=/usr/bin/ydotoold
 Restart=on-failure
+RestartSec=5
 
 [Install]
 WantedBy=default.target
@@ -114,7 +114,7 @@ esac
 WRAPPER_EOF
 chmod +x "$HOME/.local/bin/AudioKontroller"
 
-# --- systemd service ---
+# --- systemd service (with security hardening) ---
 echo "Creating user service..."
 cat > "$SERVICE_FILE" << EOF
 [Unit]
@@ -127,6 +127,9 @@ WorkingDirectory=$INSTALL_DIR
 ExecStart=$INSTALL_BIN
 Restart=on-failure
 RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=$INSTALL_DIR
 
 [Install]
 WantedBy=default.target

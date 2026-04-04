@@ -1,43 +1,57 @@
 #include "ButtonHandler.h"
-#include "WindowUtils.h"
 #include "Logger.h"
-#include <cstdlib>
+#include <unistd.h>
+#include <signal.h>
 #include <thread>
 #include <chrono>
 
+void ButtonHandler::forkExec(const std::vector<std::string>& argv) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        // Child: build null-terminated argv array and exec
+        std::vector<const char*> args;
+        for (const auto& a : argv) args.push_back(a.c_str());
+        args.push_back(nullptr);
+        execvp(args[0], const_cast<char* const*>(args.data()));
+        _exit(127); // exec failed
+    }
+    // Parent returns immediately. SA_NOCLDWAIT in main prevents zombies.
+}
+
 void ButtonHandler::toggleMediaPlayPause() {
-    std::system("playerctl play-pause &");
-    Logger::instance().info("ButtonHandler", "Toggled Play/Pause via playerctl");
+    forkExec({"playerctl", "play-pause"});
+    Logger::instance().info("ButtonHandler", "Toggled Play/Pause");
 }
 
 void ButtonHandler::sendKeySequence(const std::vector<std::string>& args) {
-    // Join all arguments into a single shell command
-    std::string cmd = "ydotool ";
-    for (const auto& arg : args) {
-        // If argument contains a space, quote it
-        if (arg.find(' ') != std::string::npos)
-            cmd += "\"" + arg + "\" ";
-        else
-            cmd += arg + " ";
-    }
+    std::vector<std::string> argv = {"ydotool"};
+    argv.insert(argv.end(), args.begin(), args.end());
+    forkExec(argv);
 
-    // Trim trailing space
-    if (!cmd.empty()) cmd.pop_back();
-
-    // Execute command
-    int result = std::system(cmd.c_str());
-
-    Logger::instance().info("ButtonHandler", "Executed: " + cmd + " (exit code " + std::to_string(result) + ")");
+    std::string desc = "ydotool";
+    for (const auto& a : args) desc += " " + a;
+    Logger::instance().info("ButtonHandler", "Dispatched: " + desc);
 }
 
 void ButtonHandler::forceCloseFocusedWindow() {
-    int pid = getFocusedWindowPID();
-    if (pid > 0) {
-        std::system(("kill -15 " + std::to_string(pid)).c_str());
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
-        std::system(("kill -9 " + std::to_string(pid)).c_str());
-        Logger::instance().info("ButtonHandler", "Forced closed PID: " + std::to_string(pid));
-    } else {
-        Logger::instance().warn("ButtonHandler", "No focused PID found, unable to close");
+    if (!getPID) {
+        Logger::instance().warn("ButtonHandler", "No PID source configured");
+        return;
     }
+    int pid = getPID();
+    if (pid <= 0) {
+        Logger::instance().warn("ButtonHandler", "No focused PID found");
+        return;
+    }
+
+    // Run kill sequence in a detached thread so HID loop is not blocked
+    std::thread([pid]() {
+        kill(pid, SIGTERM);
+        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        // Only SIGKILL if process still exists
+        if (kill(pid, 0) == 0) {
+            kill(pid, SIGKILL);
+        }
+        Logger::instance().info("ButtonHandler", "Force closed PID: " + std::to_string(pid));
+    }).detach();
 }
