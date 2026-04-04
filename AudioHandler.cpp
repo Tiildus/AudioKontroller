@@ -1,113 +1,240 @@
+// =============================================================================
+// AudioHandler.cpp — PulseAudio volume control implementation
+//
+// Threading model:
+//   - pa_threaded_mainloop runs PA's event loop in its own internal thread.
+//   - Our HID thread calls setVolumeForApp/setVolumeForPID.
+//   - Those calls lock the mainloop, write the target fields, then kick off
+//     a PA operation. The operation's result callback fires on the PA thread.
+//   - Because both sides use lock/unlock, there are no data races.
+// =============================================================================
+
 #include "AudioHandler.h"
 #include "Logger.h"
-#include <thread>
-#include <chrono>
 
-AudioHandler::AudioHandler() {
-    mainloop = pa_mainloop_new();
-    context = pa_context_new(pa_mainloop_get_api(mainloop), "AudioKontroller");
-
-    pa_context_set_state_callback(context, &AudioHandler::contextStateCallback, this);
-    pa_context_connect(context, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
-
-    // Start PulseAudio mainloop in a background thread
-    std::thread([this]() {
-        int ret;
-        pa_mainloop_run(mainloop, &ret);
-    }).detach();
-
-    // Wait until the context is ready
-    while (true) {
-        pa_context_state_t state = pa_context_get_state(context);
-        if (state == PA_CONTEXT_READY) break;
-        if (state == PA_CONTEXT_FAILED || state == PA_CONTEXT_TERMINATED) {
-            Logger::instance().error("Audio", "PulseAudio connection failed");
-            return;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(50));
+bool AudioHandler::init() {
+    // Create the PulseAudio event loop. pa_threaded_mainloop internally spawns
+    // a thread that runs the PA event dispatcher.
+    mainloop.reset(pa_threaded_mainloop_new());
+    if (!mainloop) {
+        Logger::instance().error("Audio", "Failed to create PulseAudio mainloop");
+        return false;
     }
 
-    Logger::instance().info("Audio", "Connected to PulseAudio");
+    // A pa_context is the connection to the PulseAudio server. We need the
+    // mainloop API object to associate them.
+    pa_mainloop_api* api = pa_threaded_mainloop_get_api(mainloop.get());
+    context = pa_context_new(api, "AudioKontroller");
+    if (!context) {
+        Logger::instance().error("Audio", "Failed to create PulseAudio context");
+        mainloop.reset(); // unique_ptr frees the mainloop
+        return false;
+    }
+
+    // Register a callback so we get notified when the connection state changes.
+    // The callback will signal the mainloop to unblock our wait loop below.
+    pa_context_set_state_callback(context, &AudioHandler::contextStateCallback, this);
+
+    // Begin connecting to the default PulseAudio server (nullptr = use default).
+    pa_context_connect(context, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
+
+    // Start the PA event loop thread running.
+    pa_threaded_mainloop_start(mainloop.get());
+
+    // Wait here until the context reaches READY (or a failure state).
+    // We must hold the lock while waiting so that PA doesn't race with us.
+    // pa_threaded_mainloop_wait atomically releases the lock and sleeps until
+    // pa_threaded_mainloop_signal wakes us (from contextStateCallback).
+    // The while loop guards against spurious wakeups.
+    pa_threaded_mainloop_lock(mainloop.get());
+    while (true) {
+        pa_context_state_t state = pa_context_get_state(context);
+        if (state == PA_CONTEXT_READY) {
+            connected = true;
+            break;
+        }
+        if (!PA_CONTEXT_IS_GOOD(state)) {
+            Logger::instance().error("Audio", "PulseAudio connection failed");
+            break;
+        }
+        pa_threaded_mainloop_wait(mainloop.get()); // releases lock, sleeps, re-acquires
+    }
+    pa_threaded_mainloop_unlock(mainloop.get());
+
+    if (connected) {
+        Logger::instance().info("Audio", "Connected to PulseAudio");
+    }
+    return connected;
 }
 
 AudioHandler::~AudioHandler() {
+    // Must stop the PA thread before disconnecting context, and disconnect
+    // context before freeing the mainloop. unique_ptr handles the final free.
+    if (mainloop) pa_threaded_mainloop_stop(mainloop.get());
     if (context) {
         pa_context_disconnect(context);
         pa_context_unref(context);
-        context = nullptr;
     }
-    if (mainloop) {
-        pa_mainloop_quit(mainloop, 0);
-        pa_mainloop_free(mainloop);
-        mainloop = nullptr;
-    }
+    // mainloop unique_ptr destructor calls pa_threaded_mainloop_free
 }
 
-void AudioHandler::contextStateCallback(pa_context*, void*) {
-    // State transitions are handled synchronously in the constructor
+// Called by PulseAudio whenever the connection state changes.
+// We only need to unblock the constructor's wait loop, so we just signal.
+void AudioHandler::contextStateCallback(pa_context*, void* userdata) {
+    auto* handler = static_cast<AudioHandler*>(userdata);
+    // Signal wakes up any thread blocked in pa_threaded_mainloop_wait.
+    pa_threaded_mainloop_signal(handler->mainloop.get(), 0);
 }
 
+// Enumerates all active audio streams (called "sink inputs" in PulseAudio).
+// This is a fire-and-forget PA operation: we submit it and return immediately.
+// PulseAudio calls sinkInputInfoCallback once for each stream on its thread.
+// Caller must hold the mainloop lock.
 void AudioHandler::requestSinkInputs() {
     pa_operation* op = pa_context_get_sink_input_info_list(
         context, &AudioHandler::sinkInputInfoCallback, this);
-
     if (!op) {
         Logger::instance().error("Audio", "Failed to get sink input list");
         return;
     }
-
-    if (op)
-        pa_operation_unref(op);
+    // Unreffing the operation just releases our handle to the token.
+    // The actual work continues asynchronously in the PA thread.
+    pa_operation_unref(op);
 }
 
+// Called once per active audio stream by PulseAudio.
+// When eol != 0, it's the end-of-list sentinel — no real stream data.
 void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* info, int eol, void* userdata) {
-    if (eol != 0 || !info) return;
+    if (eol != 0 || !info) return; // end-of-list sentinel, nothing to do
 
     auto* handler = static_cast<AudioHandler*>(userdata);
-    const pa_proplist* props = info->proplist;
 
-    const char* pidStr = pa_proplist_gets(props, "application.process.id");
-    std::optional<uint32_t> pid;
-    if (pidStr) pid = std::stoi(pidStr);
+    // Read this stream's process ID from its PulseAudio property list.
+    // We use strtol instead of std::stoi to avoid exceptions, which are not
+    // safe to throw inside a PA callback running on the PA thread.
+    const char* pidStr = pa_proplist_gets(info->proplist, "application.process.id");
+    uint32_t pid = 0;
+    bool hasPid = false;
+    if (pidStr) {
+        char* end = nullptr;
+        long val = strtol(pidStr, &end, 10);
+        if (end != pidStr && val > 0) { // end != pidStr means at least one digit was parsed
+            pid = static_cast<uint32_t>(val);
+            hasPid = true;
+        }
+    }
 
-    const char* appBin = pa_proplist_gets(props, "application.process.binary");
-    if (!appBin) appBin = pa_proplist_gets(props, "media.name");
+    // Prefer the process binary name (e.g. "firefox"), fall back to the
+    // generic media name if the binary name isn't in the property list.
+    const char* appBin = pa_proplist_gets(info->proplist, "application.process.binary");
+    if (!appBin) appBin = pa_proplist_gets(info->proplist, "media.name");
     std::string appName = appBin ? appBin : "";
 
+    // Check whether this stream matches either the name or PID we're targeting.
     bool match = false;
     if (!handler->targetApp.empty() && handler->targetApp == appName)
         match = true;
-    else if (handler->targetPID && pid && handler->targetPID.value() == pid.value())
+    else if (handler->hasPID && hasPid && handler->targetPID == pid)
         match = true;
 
-    if (match && handler->applyVolume) {
-        handler->setVolume(info->index, handler->targetVolume);
+    if (match) {
+        // Build a pa_cvolume with the correct channel count for this stream.
+        // Using info->volume.channels ensures stereo/surround streams all work
+        // correctly instead of hardcoding 2 channels.
+        pa_cvolume cv;
+        pa_cvolume_set(&cv, info->volume.channels,
+            static_cast<uint32_t>(handler->targetVolume * PA_VOLUME_NORM));
+
+        // Submit the volume change. Fire-and-forget; we don't need a callback.
+        pa_operation* op = pa_context_set_sink_input_volume(
+            handler->context, info->index, &cv, nullptr, nullptr);
+        if (op) pa_operation_unref(op);
     }
 }
 
-void AudioHandler::setVolume(uint32_t index, float volume) {
-    pa_cvolume cv;
-    pa_cvolume_set(&cv, 2, static_cast<uint32_t>(volume * PA_VOLUME_NORM));
-
-    pa_operation* op = pa_context_set_sink_input_volume(context, index, &cv, nullptr, nullptr);
-    if (op) {
-        if (op)
-            pa_operation_unref(op);
+// Dispatches a knob event: routes to the appropriate volume method
+// based on the knob's config type.
+void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
+    if (kc.type == "app") {
+        setVolumeForApp(kc.target, volume);
+    } else if (kc.type == "focused") {
+        if (getPID) {
+            int pid = getPID();
+            if (pid > 0) setVolumeForPID(static_cast<uint32_t>(pid), volume);
+        }
+    } else if (kc.type == "system") {
+        setSystemVolume(volume);
     }
 }
 
+// Set volume by application name. Clears any previous PID/system target.
+// Locks the mainloop so it's safe to call from the HID thread.
 void AudioHandler::setVolumeForApp(const std::string& appName, float volume) {
+    if (!connected) return;
+    pa_threaded_mainloop_lock(mainloop.get());
     targetApp = appName;
-    targetPID.reset();
+    hasPID = false;
+    isSystem = false;
     targetVolume = volume;
-    applyVolume = true;
-    requestSinkInputs();
+    requestSinkInputs(); // enumerate streams; callback applies the volume
+    pa_threaded_mainloop_unlock(mainloop.get());
 }
 
+// Set volume by PID. Clears any previous app-name target.
+// Locks the mainloop so it's safe to call from the HID thread.
 void AudioHandler::setVolumeForPID(uint32_t pid, float volume) {
+    if (!connected) return;
+    pa_threaded_mainloop_lock(mainloop.get());
     targetApp.clear();
     targetPID = pid;
+    hasPID = true;
+    isSystem = false;
     targetVolume = volume;
-    applyVolume = true;
     requestSinkInputs();
+    pa_threaded_mainloop_unlock(mainloop.get());
+}
+
+// Set the master/system volume on the default output device.
+// Queries the sink first to get its channel count, then sets the volume.
+// Locks the mainloop so it's safe to call from the HID thread.
+void AudioHandler::setSystemVolume(float volume) {
+    if (!connected) return;
+    pa_threaded_mainloop_lock(mainloop.get());
+    isSystem = true;
+    hasPID = false;
+    targetApp.clear();
+    targetVolume = volume;
+    requestSinkInfo();
+    pa_threaded_mainloop_unlock(mainloop.get());
+}
+
+// Kicks off a query for the default output device ("@DEFAULT_SINK@").
+// PulseAudio calls sinkInfoCallback with the result.
+// Must be called with the mainloop lock held.
+void AudioHandler::requestSinkInfo() {
+    pa_operation* op = pa_context_get_sink_info_by_name(
+        context, "@DEFAULT_SINK@", &AudioHandler::sinkInfoCallback, this);
+    if (!op) {
+        Logger::instance().error("Audio", "Failed to query default sink");
+        return;
+    }
+    pa_operation_unref(op);
+}
+
+// Called by PulseAudio with info about the default output sink.
+// Sets the sink volume using the actual channel count of the device.
+void AudioHandler::sinkInfoCallback(pa_context*, const pa_sink_info* info, int eol, void* userdata) {
+    if (eol != 0 || !info) return;
+
+    auto* handler = static_cast<AudioHandler*>(userdata);
+    if (!handler->isSystem) return;
+
+    // Build a cvolume with the correct channel count for this output device.
+    pa_cvolume cv;
+    pa_cvolume_set(&cv, info->volume.channels,
+        static_cast<uint32_t>(handler->targetVolume * PA_VOLUME_NORM));
+
+    pa_operation* op = pa_context_set_sink_volume_by_index(
+        handler->context, info->index, &cv, nullptr, nullptr);
+    if (op) pa_operation_unref(op);
 }

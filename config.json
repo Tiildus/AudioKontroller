@@ -3,15 +3,15 @@
     "knobThreshold": 4,
     "logFile": "audiokontroller.log",
     "knobs": [
-        { "type": "app", "target": "spotify" },
         { "type": "app", "target": "firefox" },
         { "type": "app", "target": "discord" },
-        { "type": "focused" }
+        { "type": "focused" },
+        { "type": "system" }
     ],
     "buttons": [
         { "action": "mediaPlayPause" },
-        { "action": "sendKeys", "args": ["type", "Hello World"] },
-        { "action": "forceClose" },
-        { "action": "none" }
+        { "action": "sendKeys", "args": ["key", "29:1", "41:1", "41:0", "29:0"] },
+        { "action": "none" },
+        { "action": "forceClose" }
     ]
 }

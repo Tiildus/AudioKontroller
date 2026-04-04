@@ -21,7 +21,7 @@ add_executable(audiokontrollerd
     PCPanelHandler.cpp PCPanelHandler.h
     AudioHandler.cpp AudioHandler.h
     Overlay.cpp Overlay.h
-    WindowUtils.cpp WindowUtils.h
+    FocusMonitor.cpp FocusMonitor.h
     ButtonHandler.cpp ButtonHandler.h
     ConfigManager.cpp ConfigManager.h
     Logger.cpp Logger.h
