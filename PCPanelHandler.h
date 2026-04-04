@@ -45,7 +45,6 @@ public:
     void setCallback(CCCallback cb);
     void setButtonCallback(ButtonCallback cb);
 
-<<<<<<< HEAD
     // Spawns the HID read loop in a background thread.
     void startListeningAsync();
     // Sets running=false and joins the background thread (waits for it to exit).
@@ -58,29 +57,12 @@ public:
 
     // Minimum raw value change (0–255 scale) required to fire the knob callback.
     // Filters out electrical noise / jitter from potentiometers at rest.
-=======
-    // Start HID reading in a background thread
-    void startListeningAsync();
-    // Join the background thread
-    void stopListening();
-    // Signal the read loop to stop (safe to call from signal handler)
-    void requestStop() { running = false; }
-
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     int knobThreshold = 4;
 
 private:
     // HID report byte 0 values that identify knob vs button events.
     static constexpr uint8_t INPUT_KNOB      = 0x01;
     static constexpr uint8_t INPUT_BUTTON    = 0x02;
-<<<<<<< HEAD
-=======
-    static constexpr int     HID_REPORT_SIZE = 64;
-    static constexpr int     READ_TIMEOUT_MS = 100;
-    static constexpr int     INIT_SKIP_READS = 20;
-    static constexpr int     MAX_KNOBS       = 16;
-    static constexpr int     NO_VALUE        = -1;
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 
     static constexpr int HID_REPORT_SIZE = 64;  // bytes per HID report from the device
     static constexpr int READ_TIMEOUT_MS = 100; // how long to wait for each report (milliseconds)
@@ -99,7 +81,6 @@ private:
     std::unique_ptr<hid_device, HidDeviceDeleter> device;
     CCCallback callback;
     ButtonCallback buttonCallback;
-<<<<<<< HEAD
 
     // atomic<bool> so requestStop() can safely write from a signal handler
     // while the read loop thread reads it.
@@ -108,11 +89,6 @@ private:
 
     // Tracks the last reported value per knob to implement the dead zone.
     // Initialized to NO_VALUE so the first movement always fires.
-=======
-    std::atomic<bool> running{false};
-    std::thread readThread;
-
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     std::array<int, MAX_KNOBS> lastValue;
 
     void getVidPid(PCPanelDevice type, uint16_t& vid, uint16_t& pid);

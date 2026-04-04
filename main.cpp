@@ -21,12 +21,9 @@
 #include <iostream>
 #include <memory>
 
-<<<<<<< HEAD
 // Expands a leading "~/" to the user's home directory.
 // PulseAudio and other tools use this convention; the C runtime does not
 // expand it automatically.
-=======
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 static std::string expandHome(const std::string& path) {
     if (path.size() >= 2 && path[0] == '~' && path[1] == '/') {
         const char* home = std::getenv("HOME");
@@ -35,30 +32,22 @@ static std::string expandHome(const std::string& path) {
     return path;
 }
 
-<<<<<<< HEAD
 // Maps the "device" string from config.json to the internal enum.
 // Defaults to Mini if the string is unrecognized.
-=======
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 static PCPanelDevice deviceFromString(const std::string& name) {
     if (name == "Pro") return PCPanelDevice::Pro;
     if (name == "RGB") return PCPanelDevice::RGB;
     return PCPanelDevice::Mini;
 }
 
-<<<<<<< HEAD
 // --- Signal handling ---
 // Signal handlers run asynchronously and cannot safely call most functions.
 // We keep a plain global pointer so the handler can call requestStop()
 // (which only writes an atomic bool) and ask Qt to exit its event loop.
-=======
-// Signal handling
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 static PCPanelHandler* globalPanel = nullptr;
 
 static void signalHandler(int) {
     if (globalPanel) globalPanel->requestStop();
-<<<<<<< HEAD
     QCoreApplication::quit(); // tells app.exec() to return
 }
 
@@ -72,26 +61,13 @@ int main(int argc, char *argv[]) {
     // fork/exec, we need to prevent them from becoming zombies.
     // SA_NOCLDWAIT tells the kernel to discard child exit status automatically
     // instead of keeping it until the parent calls wait().
-=======
-    QCoreApplication::quit();
-}
-
-int main(int argc, char *argv[]) {
-    QCoreApplication app(argc, argv);
-
-    // Prevent zombie child processes from fire-and-forget forkExec
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     struct sigaction sa_chld{};
     sa_chld.sa_handler = SIG_IGN;
     sa_chld.sa_flags = SA_NOCLDWAIT;
     sigaction(SIGCHLD, &sa_chld, nullptr);
 
-<<<<<<< HEAD
     // Accept an optional config path as the first argument,
     // falling back to "config.json" in the working directory.
-=======
-    // Load config
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     std::string configPath = "config.json";
     if (argc > 1) configPath = argv[1];
 
@@ -109,7 +85,6 @@ int main(int argc, char *argv[]) {
     Logger::instance().init(expandHome(cfg.logFile));
     Logger::instance().info("Main", "Config loaded from " + configPath);
 
-<<<<<<< HEAD
     // Determine the directory the binary lives in so FocusMonitor knows where
     // to write its KWin script file. /proc/self/exe is a symlink to the
     // current executable on Linux.
@@ -123,53 +98,29 @@ int main(int argc, char *argv[]) {
 
     // Construct all subsystems. The order matters for destruction (LIFO):
     // panel must be stopped before audio is torn down.
-=======
-    // Determine install directory (where the binary lives) for writing KWin script
-    std::string installDir = ".";
-    char* exePath = realpath("/proc/self/exe", nullptr);
-    if (exePath) {
-        std::string exeStr(exePath);
-        auto lastSlash = exeStr.rfind('/');
-        if (lastSlash != std::string::npos) installDir = exeStr.substr(0, lastSlash);
-        free(exePath);
-    }
-
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     Overlay overlay;
     AudioHandler audio;
     if (!audio.init()) {
         Logger::instance().warn("Main", "PulseAudio unavailable, volume control disabled");
     }
     ButtonHandler button;
-<<<<<<< HEAD
     FocusMonitor focusMonitor(installDir); // registers D-Bus service, loads KWin script
 
     // Inject FocusMonitor's PID lookup into ButtonHandler and AudioHandler so they
     // can access the focused window's PID without depending on FocusMonitor directly.
     button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
     audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
-=======
-    FocusMonitor focusMonitor(installDir);
-
-    // Wire up ButtonHandler to use FocusMonitor for PID
-    button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 
     PCPanelHandler panel(deviceFromString(cfg.device));
     panel.knobThreshold = cfg.knobThreshold;
 
-<<<<<<< HEAD
     // Register signal handlers after all objects are constructed so
     // globalPanel is valid before any signal could arrive.
-=======
-    // Install signal handlers for clean shutdown
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     globalPanel = &panel;
     struct sigaction sa{};
     sa.sa_handler = signalHandler;
     sigemptyset(&sa.sa_mask);
     sa.sa_flags = 0;
-<<<<<<< HEAD
     sigaction(SIGTERM, &sa, nullptr); // sent by systemd on service stop
     sigaction(SIGINT,  &sa, nullptr); // sent by Ctrl+C in terminal
 
@@ -190,30 +141,12 @@ int main(int argc, char *argv[]) {
         // avoid showing two overlapping popups at the same time.
         if (cfg.knobs[knob].type != "system")
             overlay.showVolume(vol);
-=======
-    sigaction(SIGTERM, &sa, nullptr);
-    sigaction(SIGINT, &sa, nullptr);
-
-    // --- Volume Controls (driven by config) ---
-    panel.setCallback([&](int knob, float vol) {
-        if (knob < 0 || knob >= static_cast<int>(cfg.knobs.size())) return;
-
-        const KnobConfig& kc = cfg.knobs[knob];
-        if (kc.type == "app") {
-            audio.setVolumeForApp(kc.target, vol);
-        } else if (kc.type == "focused") {
-            int pid = focusMonitor.getPID();
-            if (pid > 0) audio.setVolumeForPID(static_cast<uint32_t>(pid), vol);
-        }
-        overlay.showVolume(vol);
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     });
 
     // --- Button Controls (button callback, driven by config) ---
     // Called by the HID read thread when a button is pressed.
     // ButtonHandler::handleButton dispatches based on config action.
     panel.setButtonCallback([&](int btn) {
-<<<<<<< HEAD
         if (btn >= 0 && btn < static_cast<int>(cfg.buttons.size()))
             button.handleButton(cfg.buttons[btn]);
     });
@@ -229,27 +162,6 @@ int main(int argc, char *argv[]) {
     int ret = app.exec();
 
     // Graceful shutdown: join the HID thread before destructors run.
-=======
-        if (btn < 0 || btn >= static_cast<int>(cfg.buttons.size())) return;
-
-        const ButtonConfig& bc = cfg.buttons[btn];
-        if (bc.action == "mediaPlayPause") {
-            button.toggleMediaPlayPause();
-        } else if (bc.action == "sendKeys") {
-            button.sendKeySequence(bc.args);
-        } else if (bc.action == "forceClose") {
-            button.forceCloseFocusedWindow();
-        }
-    });
-
-    // Start HID reading in background thread
-    panel.startListeningAsync();
-
-    // Run Qt event loop on main thread (processes D-Bus callbacks from KWin)
-    int ret = app.exec();
-
-    // Clean shutdown
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     panel.stopListening();
     Logger::instance().info("Main", "Shutdown complete");
     return ret;

@@ -35,13 +35,10 @@ void Logger::log(LogLevel level, const std::string& tag, const std::string& mess
     std::lock_guard<std::mutex> lock(mtx);
     if (initialized && file.is_open()) {
         file << timestamp() << " [" << levelStr(level) << "] [" << tag << "] " << message << "\n";
-<<<<<<< HEAD
         // Flush on WARN and ERROR so important messages are never lost in the
         // OS write buffer if the daemon crashes or is killed.
         // INFO messages are left buffered to reduce disk I/O during normal
         // operation (knobs fire many callbacks per second).
-=======
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
         if (level >= LogLevel::WARN) file.flush();
     }
 }

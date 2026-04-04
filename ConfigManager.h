@@ -60,16 +60,12 @@ public:
     // If the file doesn't exist, calls createDefault() to generate one first.
     // Returns false if the file cannot be read or parsed.
     bool load(const std::string& path);
-<<<<<<< HEAD
 
     // Writes a default config.json to the given path.
     // Returns false if the file cannot be written.
     bool createDefault(const std::string& path);
 
     // Returns the parsed config. Only valid after a successful load().
-=======
-    bool createDefault(const std::string& path);
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     const Config& get() const { return config; }
 
 private:

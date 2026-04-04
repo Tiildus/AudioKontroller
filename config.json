@@ -10,7 +10,7 @@
     ],
     "buttons": [
         { "action": "mediaPlayPause" },
-        { "action": "sendKeys", "args": ["key", "29:1", "41:1", "41:0", "29:0"] },
+        { "action": "sendKeys", "keys": "ctrl+grave" },
         { "action": "none" },
         { "action": "forceClose" }
     ]

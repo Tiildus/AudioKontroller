@@ -37,29 +37,14 @@ PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
 }
 
 PCPanelHandler::~PCPanelHandler() {
-<<<<<<< HEAD
     stopListening(); // join the thread before closing the device handle
     device.reset();  // close HID device before shutting down hidapi
     hid_exit();      // clean up hidapi/libusb resources
-=======
-    stopListening();
-    if (device) {
-        hid_close(device);
-    }
-    hid_exit();
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 }
 
 void PCPanelHandler::setCallback(CCCallback cb)           { callback = cb; }
 void PCPanelHandler::setButtonCallback(ButtonCallback cb) { buttonCallback = cb; }
 
-<<<<<<< HEAD
-=======
-void PCPanelHandler::setButtonCallback(ButtonCallback cb) {
-    buttonCallback = cb;
-}
-
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 void PCPanelHandler::startListeningAsync() {
     if (!device) {
         Logger::instance().error("PCPanel", "No device connected, cannot listen");
@@ -69,12 +54,9 @@ void PCPanelHandler::startListeningAsync() {
     readThread = std::thread(&PCPanelHandler::readLoop, this);
 }
 
-<<<<<<< HEAD
 // Signals the loop to stop and waits for the thread to finish.
 // Joinable check is needed because stopListening() may be called from
 // both the destructor and the signal handler path.
-=======
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 void PCPanelHandler::stopListening() {
     running = false;
     if (readThread.joinable()) readThread.join();
@@ -139,27 +121,7 @@ void PCPanelHandler::readLoop() {
     while (running) {
         int bytesRead = hid_read_timeout(device.get(), buf, HID_REPORT_SIZE, READ_TIMEOUT_MS);
 
-<<<<<<< HEAD
         if (bytesRead == 0) continue;
-=======
-        if (bytesRead == 0) continue; // timeout, normal
-
-        if (bytesRead < 0) {
-            consecutiveErrors++;
-            if (consecutiveErrors == 1) {
-                Logger::instance().error("PCPanel", "HID read error, device may be disconnected");
-            }
-            if (consecutiveErrors >= 50) {
-                Logger::instance().error("PCPanel", "Too many HID errors, stopping");
-                running = false;
-                break;
-            }
-            std::this_thread::sleep_for(std::chrono::milliseconds(100));
-            continue;
-        }
-
-        consecutiveErrors = 0;
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 
         if (bytesRead < 0) {
             if (!handleHidError(consecutiveErrors)) break;

@@ -26,7 +26,6 @@ public:
     AudioHandler() = default;
     ~AudioHandler();
 
-<<<<<<< HEAD
     // Connects to PulseAudio. Returns true on success, false on failure.
     // Must be called before setVolumeForApp/setVolumeForPID.
     bool init();
@@ -48,10 +47,6 @@ public:
 
     // Set volume (0.0–1.0) for all PulseAudio streams belonging to a specific PID.
     // Used for the "focused" knob, where we know the window's PID but not its name.
-=======
-    bool isConnected() const { return connected; }
-    void setVolumeForApp(const std::string& appName, float volume);
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     void setVolumeForPID(uint32_t pid, float volume);
 
     // Set the master/system volume (0.0–1.0) on the default output device.
@@ -59,7 +54,6 @@ public:
     void setSystemVolume(float volume);
 
 private:
-<<<<<<< HEAD
     // Holds the injected PID-lookup function for "focused" knob type.
     std::function<int()> getPID;
 
@@ -82,16 +76,6 @@ private:
     uint32_t targetPID = 0;
     bool hasPID = false;     // true when matching by PID instead of name
     bool isSystem = false;   // true when targeting the default output device
-=======
-    pa_threaded_mainloop* mainloop = nullptr;
-    pa_context* context = nullptr;
-    bool connected = false;
-
-    // Filter parameters for callback (protected by mainloop lock)
-    std::string targetApp;
-    uint32_t targetPID = 0;
-    bool hasPID = false;
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     float targetVolume = 1.0f;
 
     // Called by PulseAudio when the context state changes (connecting, ready, failed).
@@ -102,7 +86,6 @@ private:
     // eol == 0: valid stream info; eol != 0: end of list sentinel.
     static void sinkInputInfoCallback(pa_context* c, const pa_sink_input_info* info, int eol, void* userdata);
 
-<<<<<<< HEAD
     // Called by PulseAudio with info about the default output device (sink).
     // Used by setSystemVolume to get the channel count before setting volume.
     static void sinkInfoCallback(pa_context* c, const pa_sink_info* info, int eol, void* userdata);
@@ -116,7 +99,4 @@ private:
     // The result is delivered asynchronously to sinkInfoCallback.
     // Must be called with the mainloop lock held.
     void requestSinkInfo();
-=======
-    void requestSinkInputs(); // must be called with lock held
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 };

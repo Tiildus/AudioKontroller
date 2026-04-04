@@ -1,4 +1,3 @@
-<<<<<<< HEAD
 // =============================================================================
 // FocusMonitor.h — Event-driven focused window PID tracking via KWin D-Bus
 //
@@ -21,8 +20,6 @@
 // every 2 seconds for up to 30 seconds.
 // =============================================================================
 
-=======
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
 #pragma once
 #include <QObject>
 #include <QDBusConnection>
@@ -32,7 +29,6 @@
 
 class FocusMonitor : public QObject {
     Q_OBJECT
-<<<<<<< HEAD
     // This annotation tells Qt's MOC (Meta-Object Compiler) what D-Bus interface
     // name to expose for this class. KWin's script uses this name in callDBus().
     Q_CLASSINFO("D-Bus Interface", "com.audiokontroller.FocusMonitor")
@@ -81,32 +77,5 @@ private:
     bool loadKWinScript();
 
     // Unregisters the script from KWin. Called on destruction.
-=======
-    Q_CLASSINFO("D-Bus Interface", "com.audiokontroller.FocusMonitor")
-
-public:
-    explicit FocusMonitor(const std::string& scriptDir, QObject* parent = nullptr);
-    ~FocusMonitor();
-
-    int getPID() const { return activePID.load(std::memory_order_relaxed); }
-
-public Q_SLOTS:
-    // Called by KWin script via D-Bus when the active window changes
-    void SetPID(int pid);
-
-private Q_SLOTS:
-    void retryLoadKWinScript();
-
-private:
-    std::atomic<int> activePID{-1};
-    int scriptId = -1;
-    std::string scriptPath;
-    QTimer retryTimer;
-    int retryCount = 0;
-    static constexpr int MAX_RETRIES = 15;
-    static constexpr int RETRY_INTERVAL_MS = 2000;
-
-    bool loadKWinScript();
->>>>>>> 19608d98419239a49247ade622cad99dd04757f5
     void unloadKWinScript();
 };
