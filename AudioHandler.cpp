@@ -11,6 +11,19 @@
 
 #include "AudioHandler.h"
 #include "Logger.h"
+#include <algorithm>
+#include <cctype>
+
+// Case-insensitive substring check: returns true if haystack contains needle
+// (ignoring capitalization). For example, "Discord" contains "discord".
+static bool containsIgnoreCase(const std::string& haystack, const std::string& needle) {
+    if (needle.empty() || needle.size() > haystack.size()) return false;
+    auto it = std::search(haystack.begin(), haystack.end(),
+                          needle.begin(), needle.end(),
+                          [](char a, char b) { return std::tolower(static_cast<unsigned char>(a))
+                                                   == std::tolower(static_cast<unsigned char>(b)); });
+    return it != haystack.end();
+}
 
 bool AudioHandler::init() {
     // Create the PulseAudio event loop. pa_threaded_mainloop internally spawns
@@ -124,17 +137,31 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
         }
     }
 
-    // Prefer the process binary name (e.g. "firefox"), fall back to the
-    // generic media name if the binary name isn't in the property list.
-    const char* appBin = pa_proplist_gets(info->proplist, "application.process.binary");
-    if (!appBin) appBin = pa_proplist_gets(info->proplist, "media.name");
-    std::string appName = appBin ? appBin : "";
+    // Gather all name fields PulseAudio provides for this stream.
+    // Different apps populate different fields, so we check all of them:
+    //   application.process.binary — e.g. "firefox", "Discord"
+    //   application.name           — e.g. "Firefox", "WEBRTC VoiceEngine"
+    //   media.name                 — e.g. "Playback", "AudioStream"
+    const char* names[] = {
+        pa_proplist_gets(info->proplist, "application.process.binary"),
+        pa_proplist_gets(info->proplist, "application.name"),
+        pa_proplist_gets(info->proplist, "media.name"),
+    };
 
-    // Check whether this stream matches either the name or PID we're targeting.
+    // Match if any config target is a case-insensitive substring of any
+    // PulseAudio name field. This means "discord" in config matches a
+    // binary named "Discord" or an app named "discord-canary".
     bool match = false;
-    if (!handler->targetApp.empty() && handler->targetApp == appName)
-        match = true;
-    else if (handler->hasPID && hasPid && handler->targetPID == pid)
+    for (const auto& target : handler->targetApps) {
+        for (const char* name : names) {
+            if (name && containsIgnoreCase(std::string(name), target)) {
+                match = true;
+                break;
+            }
+        }
+        if (match) break;
+    }
+    if (!match && handler->hasPID && hasPid && handler->targetPID == pid)
         match = true;
 
     if (match) {
@@ -156,7 +183,7 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
 // based on the knob's config type.
 void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
     if (kc.type == "app") {
-        setVolumeForApp(kc.target, volume);
+        setVolumeForApps(kc.targets, volume);
     } else if (kc.type == "focused") {
         if (getPID) {
             int pid = getPID();
@@ -167,12 +194,12 @@ void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
     }
 }
 
-// Set volume by application name. Clears any previous PID/system target.
+// Set volume by application name(s). Clears any previous PID/system target.
 // Locks the mainloop so it's safe to call from the HID thread.
-void AudioHandler::setVolumeForApp(const std::string& appName, float volume) {
+void AudioHandler::setVolumeForApps(const std::vector<std::string>& appNames, float volume) {
     if (!connected) return;
     pa_threaded_mainloop_lock(mainloop.get());
-    targetApp = appName;
+    targetApps = appNames;
     hasPID = false;
     isSystem = false;
     targetVolume = volume;
@@ -185,7 +212,7 @@ void AudioHandler::setVolumeForApp(const std::string& appName, float volume) {
 void AudioHandler::setVolumeForPID(uint32_t pid, float volume) {
     if (!connected) return;
     pa_threaded_mainloop_lock(mainloop.get());
-    targetApp.clear();
+    targetApps.clear();
     targetPID = pid;
     hasPID = true;
     isSystem = false;
@@ -202,7 +229,7 @@ void AudioHandler::setSystemVolume(float volume) {
     pa_threaded_mainloop_lock(mainloop.get());
     isSystem = true;
     hasPID = false;
-    targetApp.clear();
+    targetApps.clear();
     targetVolume = volume;
     requestSinkInfo();
     pa_threaded_mainloop_unlock(mainloop.get());

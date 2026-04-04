@@ -14,6 +14,7 @@
 
 #pragma once
 #include "ConfigManager.h"
+#include <unordered_map>
 #include <vector>
 #include <string>
 #include <functional>
@@ -32,9 +33,13 @@ public:
     // Toggles media playback (uses playerctl).
     void toggleMediaPlayPause();
 
-    // Sends a key sequence using ydotool. "keys" is passed directly as
+    // Sends a key sequence using ydotool. "args" is passed directly as
     // ydotool arguments (e.g. {"key", "29:1", "41:1", "41:0", "29:0"}).
-    void sendKeySequence(const std::vector<std::string>& keys);
+    void sendKeySequence(const std::vector<std::string>& args);
+
+    // Translates a human-readable key combo like "ctrl+grave" into the
+    // ydotool key code:state arguments and executes it.
+    void sendKeyCombo(const std::string& combo);
 
     // Sends SIGTERM to the focused window's process, waits 1 second,
     // then sends SIGKILL if it hasn't exited. Runs in a detached thread
@@ -49,4 +54,8 @@ private:
     // The parent returns without waiting — fire-and-forget.
     // argv[0] is the program name; remaining elements are its arguments.
     static void forkExec(const std::vector<std::string>& argv);
+
+    // Maps human-readable key names (lowercase) to Linux input event keycodes.
+    // These codes come from linux/input-event-codes.h and are what ydotool expects.
+    static const std::unordered_map<std::string, int> keyMap;
 };

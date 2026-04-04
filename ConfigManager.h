@@ -21,7 +21,12 @@ struct KnobConfig {
     std::string type;   // "app"     — target a specific application by name
                         // "focused" — target whichever window has keyboard focus
                         // "system"  — target the default output device (master volume)
-    std::string target; // the app binary name (only used when type == "app")
+
+    // App binary name(s) to control (only used when type == "app").
+    // Supports a single string or an array in config.json:
+    //   { "type": "app", "target": "firefox" }
+    //   { "type": "app", "target": ["chrome", "firefox"] }
+    std::vector<std::string> targets;
 };
 
 // Describes what one physical button does when pressed.
@@ -30,7 +35,12 @@ struct ButtonConfig {
                                      // "sendKeys"       — send a key sequence via ydotool
                                      // "forceClose"     — kill the focused window
                                      // "none"           — do nothing
-    std::vector<std::string> args;   // ydotool arguments (only used for "sendKeys")
+
+    // For "sendKeys" action, use ONE of these two fields:
+    //   "keys": "ctrl+grave"                  — human-readable key combo (recommended)
+    //   "args": ["key", "29:1", "41:1", ...]  — raw ydotool arguments (advanced)
+    std::string keys;                // friendly key combo string (e.g. "ctrl+shift+a")
+    std::vector<std::string> args;   // raw ydotool arguments (fallback)
 };
 
 // The complete parsed configuration.

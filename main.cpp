@@ -133,9 +133,14 @@ int main(int argc, char *argv[]) {
     // This lambda is called by the HID read thread every time a knob moves.
     // AudioHandler::handleKnob dispatches based on config type.
     panel.setCallback([&](int knob, float vol) {
-        if (knob >= 0 && knob < static_cast<int>(cfg.knobs.size()))
-            audio.handleKnob(cfg.knobs[knob], vol);
-        overlay.showVolume(vol);
+        if (knob < 0 || knob >= static_cast<int>(cfg.knobs.size())) return;
+
+        audio.handleKnob(cfg.knobs[knob], vol);
+
+        // System volume already triggers KDE's own OSD, so skip ours to
+        // avoid showing two overlapping popups at the same time.
+        if (cfg.knobs[knob].type != "system")
+            overlay.showVolume(vol);
     });
 
     // --- Button Controls (button callback, driven by config) ---

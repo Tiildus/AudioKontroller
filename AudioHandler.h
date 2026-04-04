@@ -40,10 +40,10 @@ public:
     // Supported types: "app", "focused", "system"
     void handleKnob(const KnobConfig& kc, float volume);
 
-    // Set volume (0.0–1.0) for all PulseAudio streams belonging to the named app.
-    // "appName" is matched against the process binary name reported by PulseAudio
+    // Set volume (0.0–1.0) for all PulseAudio streams belonging to the named app(s).
+    // Each name is matched against the process binary name reported by PulseAudio
     // (e.g. "firefox", "spotify", "discord").
-    void setVolumeForApp(const std::string& appName, float volume);
+    void setVolumeForApps(const std::vector<std::string>& appNames, float volume);
 
     // Set volume (0.0–1.0) for all PulseAudio streams belonging to a specific PID.
     // Used for the "focused" knob, where we know the window's PID but not its name.
@@ -72,7 +72,7 @@ private:
     // These fields describe the current volume request. They are only written
     // while holding the mainloop lock, and only read from inside PA callbacks
     // (which also run under the lock), so no extra synchronization is needed.
-    std::string targetApp;   // non-empty when matching by name
+    std::vector<std::string> targetApps;  // non-empty when matching by name(s)
     uint32_t targetPID = 0;
     bool hasPID = false;     // true when matching by PID instead of name
     bool isSystem = false;   // true when targeting the default output device

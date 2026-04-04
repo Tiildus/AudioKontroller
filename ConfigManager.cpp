@@ -78,24 +78,36 @@ bool ConfigManager::createDefault(const std::string& path) {
         if (!target.isEmpty()) obj["target"] = target;
         return obj;
     };
-    knobs.append(makeKnob("app", "firefox"));
-    knobs.append(makeKnob("app", "discord"));
+    knobs.append(makeKnob("app", "firefox"));        // single app
+    knobs.append(makeKnob("app", "discord"));         // single app
     knobs.append(makeKnob("focused"));
     knobs.append(makeKnob("system"));
     root["knobs"] = knobs;
 
     // Build the buttons array
     QJsonArray buttons;
-    auto makeButton = [](const QString& action, const QJsonArray& args = {}) {
-        QJsonObject obj;
-        obj["action"] = action;
-        if (!args.isEmpty()) obj["args"] = args;
-        return obj;
-    };
-    buttons.append(makeButton("mediaPlayPause"));
-    buttons.append(makeButton("sendKeys", QJsonArray({"key", "29:1", "41:1", "41:0", "29:0"})));
-    buttons.append(makeButton("none"));
-    buttons.append(makeButton("forceClose"));
+    {
+        QJsonObject b;
+        b["action"] = "mediaPlayPause";
+        buttons.append(b);
+    }
+    {
+        // Example: Ctrl+` combo using human-readable key names
+        QJsonObject b;
+        b["action"] = "sendKeys";
+        b["keys"] = "ctrl+grave";
+        buttons.append(b);
+    }
+    {
+        QJsonObject b;
+        b["action"] = "none";
+        buttons.append(b);
+    }
+    {
+        QJsonObject b;
+        b["action"] = "forceClose";
+        buttons.append(b);
+    }
     root["buttons"] = buttons;
 
     QFile file(QString::fromStdString(path));
@@ -110,19 +122,35 @@ bool ConfigManager::createDefault(const std::string& path) {
 }
 
 // Parses a single knob entry from its JSON object.
+// "target" can be a single string or an array of strings.
 // Missing fields fall back to safe defaults.
 KnobConfig ConfigManager::parseKnob(const QJsonObject& obj) {
     KnobConfig k;
-    k.type   = obj.value("type").toString("app").toStdString();
-    k.target = obj.value("target").toString("").toStdString();
+    k.type = obj.value("type").toString("app").toStdString();
+
+    QJsonValue targetVal = obj.value("target");
+    if (targetVal.isArray()) {
+        // Array form: { "target": ["chrome", "firefox"] }
+        for (const auto& item : targetVal.toArray()) {
+            std::string s = item.toString().toStdString();
+            if (!s.empty()) k.targets.push_back(s);
+        }
+    } else if (targetVal.isString()) {
+        // Single string form: { "target": "firefox" }
+        std::string s = targetVal.toString().toStdString();
+        if (!s.empty()) k.targets.push_back(s);
+    }
     return k;
 }
 
 // Parses a single button entry from its JSON object.
-// "args" is an optional array of strings (used by "sendKeys").
+// "keys" is a human-readable combo string (e.g. "ctrl+grave").
+// "args" is the raw ydotool arguments fallback (e.g. ["key", "29:1", ...]).
+// If both are present, "keys" takes priority.
 ButtonConfig ConfigManager::parseButton(const QJsonObject& obj) {
     ButtonConfig b;
     b.action = obj.value("action").toString("none").toStdString();
+    b.keys = obj.value("keys").toString("").toStdString();
     QJsonArray argsArr = obj.value("args").toArray();
     for (const auto& a : argsArr) {
         b.args.push_back(a.toString().toStdString());
