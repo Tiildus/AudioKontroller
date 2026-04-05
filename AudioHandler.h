@@ -10,8 +10,7 @@
 //   AudioHandler audio;
 //   audio.init();                               // connect to PulseAudio
 //   audio.setVolumeForApps({"firefox"}, 0.5f);   // 50% volume for Firefox
-//   audio.setVolumeForPID(1234, 0.75f);         // 75% volume for PID 1234
-//   audio.setSystemVolume(0.8f);                // 80% master/system volume
+//   audio.setSystemVolume(0.8f);                 // 80% master/system volume
 // =============================================================================
 
 #pragma once
@@ -27,7 +26,7 @@ public:
     ~AudioHandler();
 
     // Connects to PulseAudio. Returns true on success, false on failure.
-    // Must be called before setVolumeForApp/setVolumeForPID.
+    // Must be called before any volume control methods.
     bool init();
 
     bool isConnected() const { return connected; }
@@ -44,10 +43,6 @@ public:
     // Each name is matched against the process binary name reported by PulseAudio
     // (e.g. "firefox", "spotify", "discord").
     void setVolumeForApps(const std::vector<std::string>& appNames, float volume);
-
-    // Set volume (0.0–1.0) for all PulseAudio streams belonging to a specific PID.
-    // Used for the "focused" knob, where we know the window's PID but not its name.
-    void setVolumeForPID(uint32_t pid, float volume);
 
     // Set the master/system volume (0.0–1.0) on the default output device.
     // Affects all audio, regardless of which application is playing.
@@ -73,8 +68,6 @@ private:
     // while holding the mainloop lock, and only read from inside PA callbacks
     // (which also run under the lock), so no extra synchronization is needed.
     std::vector<std::string> targetApps;  // non-empty when matching by name(s)
-    uint32_t targetPID = 0;
-    bool hasPID = false;     // true when matching by PID instead of name
     bool isSystem = false;   // true when targeting the default output device
     float targetVolume = 1.0f;
 

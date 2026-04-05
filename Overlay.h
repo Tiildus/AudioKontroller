@@ -18,6 +18,5 @@ public:
 
 private:
     // Sends a D-Bus message to KDE Plasma's OSD service.
-    // Sends a D-Bus message to KDE Plasma's OSD service.
     void showKDEOSD(const QString &title, const QString &text);
 };

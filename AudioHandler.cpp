@@ -3,7 +3,7 @@
 //
 // Threading model:
 //   - pa_threaded_mainloop runs PA's event loop in its own internal thread.
-//   - Our HID thread calls setVolumeForApp/setVolumeForPID.
+//   - Our HID thread calls setVolumeForApps/setSystemVolume (via handleKnob).
 //   - Those calls lock the mainloop, write the target fields, then kick off
 //     a PA operation. The operation's result callback fires on the PA thread.
 //   - Because both sides use lock/unlock, there are no data races.
@@ -62,7 +62,6 @@ bool AudioHandler::init() {
         Logger::instance().error("Audio", "Failed to create PulseAudio mainloop");
         return false;
     }
-    pa_threaded_mainloop_unlock(mainloop);
 
     // A pa_context is the connection to the PulseAudio server. We need the
     // mainloop API object to associate them.
@@ -152,21 +151,6 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
 
     auto* handler = static_cast<AudioHandler*>(userdata);
 
-    // Read this stream's process ID from its PulseAudio property list.
-    // We use strtol instead of std::stoi to avoid exceptions, which are not
-    // safe to throw inside a PA callback running on the PA thread.
-    const char* pidStr = pa_proplist_gets(info->proplist, "application.process.id");
-    uint32_t pid = 0;
-    bool hasPid = false;
-    if (pidStr) {
-        char* end = nullptr;
-        long val = strtol(pidStr, &end, 10);
-        if (end != pidStr && val > 0) { // end != pidStr means at least one digit was parsed
-            pid = static_cast<uint32_t>(val);
-            hasPid = true;
-        }
-    }
-
     // Gather all name fields PulseAudio provides for this stream.
     // Different apps populate different fields, so we check all of them:
     //   application.process.binary — e.g. "firefox", "Discord"
@@ -181,6 +165,8 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
     // Match if any config target is a case-insensitive substring of any
     // PulseAudio name field. This means "discord" in config matches a
     // binary named "Discord" or an app named "discord-canary".
+    // The "focused" knob type also uses this path — handleKnob resolves the
+    // focused window's PID to a process name via /proc, then feeds it here.
     bool match = false;
     for (const auto& target : handler->targetApps) {
         for (const char* name : names) {
@@ -191,8 +177,6 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
         }
         if (match) break;
     }
-    if (!match && handler->hasPID && hasPid && handler->targetPID == pid)
-        match = true;
 
     if (match) {
         // Build a pa_cvolume with the correct channel count for this stream.
@@ -225,12 +209,8 @@ void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
                 // the audio-playing process are different PIDs but share the
                 // same binary name in PulseAudio.
                 std::string name = getProcessName(static_cast<uint32_t>(pid));
-                if (!name.empty()) {
+                if (!name.empty())
                     setVolumeForApps({name}, volume);
-                } else {
-                    // Fallback: if /proc read failed, try direct PID match
-                    setVolumeForPID(static_cast<uint32_t>(pid), volume);
-                }
             }
         }
     } else if (kc.type == "system") {
@@ -238,30 +218,15 @@ void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
     }
 }
 
-// Set volume by application name(s). Clears any previous PID/system target.
+// Set volume by application name(s). Clears any previous system target.
 // Locks the mainloop so it's safe to call from the HID thread.
 void AudioHandler::setVolumeForApps(const std::vector<std::string>& appNames, float volume) {
     if (!connected) return;
     pa_threaded_mainloop_lock(mainloop.get());
     targetApps = appNames;
-    hasPID = false;
     isSystem = false;
     targetVolume = volume;
     requestSinkInputs(); // enumerate streams; callback applies the volume
-    pa_threaded_mainloop_unlock(mainloop.get());
-}
-
-// Set volume by PID. Clears any previous app-name target.
-// Locks the mainloop so it's safe to call from the HID thread.
-void AudioHandler::setVolumeForPID(uint32_t pid, float volume) {
-    if (!connected) return;
-    pa_threaded_mainloop_lock(mainloop.get());
-    targetApps.clear();
-    targetPID = pid;
-    hasPID = true;
-    isSystem = false;
-    targetVolume = volume;
-    requestSinkInputs();
     pa_threaded_mainloop_unlock(mainloop.get());
 }
 
@@ -272,7 +237,6 @@ void AudioHandler::setSystemVolume(float volume) {
     if (!connected) return;
     pa_threaded_mainloop_lock(mainloop.get());
     isSystem = true;
-    hasPID = false;
     targetApps.clear();
     targetVolume = volume;
     requestSinkInfo();

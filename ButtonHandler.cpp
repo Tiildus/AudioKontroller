@@ -122,19 +122,6 @@ void ButtonHandler::handleButton(const ButtonConfig& bc) {
     // "none" action intentionally does nothing
 }
 
-void ButtonHandler::forkExec(const std::vector<std::string>& argv) {
-    pid_t pid = fork();
-    if (pid == 0) {
-        // Child: build null-terminated argv array and exec
-        std::vector<const char*> args;
-        for (const auto& a : argv) args.push_back(a.c_str());
-        args.push_back(nullptr);
-        execvp(args[0], const_cast<char* const*>(args.data()));
-        _exit(127); // exec failed
-    }
-    // Parent returns immediately. SA_NOCLDWAIT in main prevents zombies.
-}
-
 void ButtonHandler::toggleMediaPlayPause() {
     forkExec({"playerctl", "play-pause"});
     Logger::instance().info("ButtonHandler", "Toggled Play/Pause");
