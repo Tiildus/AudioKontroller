@@ -32,8 +32,6 @@ static std::string expandHome(const std::string& path) {
     return path;
 }
 
-// Maps the "device" string from config.json to the internal enum.
-// Defaults to Mini if the string is unrecognized.
 static PCPanelDevice deviceFromString(const std::string& name) {
     if (name == "Pro") return PCPanelDevice::Pro;
     if (name == "RGB") return PCPanelDevice::RGB;
@@ -81,7 +79,6 @@ int main(int argc, char *argv[]) {
     }
     const Config& cfg = configMgr.get();
 
-    // Initialize the log file. All subsequent output goes here, not stdout.
     Logger::instance().init(expandHome(cfg.logFile));
     Logger::instance().info("Main", "Config loaded from " + configPath);
 
@@ -124,14 +121,11 @@ int main(int argc, char *argv[]) {
     sigaction(SIGTERM, &sa, nullptr); // sent by systemd on service stop
     sigaction(SIGINT,  &sa, nullptr); // sent by Ctrl+C in terminal
 
-    // Log startup status so it's immediately obvious which subsystems are active.
     Logger::instance().info("Main", std::string("PCPanel: ") + (panel.isConnected() ? "connected" : "not found"));
     Logger::instance().info("Main", std::string("PulseAudio: ") + (audio.isConnected() ? "connected" : "unavailable"));
     Logger::instance().info("Main", std::string("FocusMonitor: ") + (focusMonitor.isScriptLoaded() ? "active" : "pending/failed"));
 
-    // --- Volume Controls (knob callback, driven by config) ---
-    // This lambda is called by the HID read thread every time a knob moves.
-    // AudioHandler::handleKnob dispatches based on config type.
+    // --- Knob callback (HID read thread) ---
     panel.setCallback([&](int knob, float vol) {
         if (knob < 0 || knob >= static_cast<int>(cfg.knobs.size())) return;
 
@@ -143,9 +137,7 @@ int main(int argc, char *argv[]) {
             overlay.showVolume(vol);
     });
 
-    // --- Button Controls (button callback, driven by config) ---
-    // Called by the HID read thread when a button is pressed.
-    // ButtonHandler::handleButton dispatches based on config action.
+    // --- Button callback (HID read thread) ---
     panel.setButtonCallback([&](int btn) {
         if (btn >= 0 && btn < static_cast<int>(cfg.buttons.size()))
             button.handleButton(cfg.buttons[btn]);

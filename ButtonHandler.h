@@ -24,10 +24,8 @@ public:
     ButtonHandler() = default;
 
     // Injects a function that returns the focused window's PID.
-    // Called from main.cpp with a lambda that reads FocusMonitor::getPID().
     void setGetPIDFunc(std::function<int()> func) { getPID = func; }
 
-    // Dispatches a button event based on the button's config action.
     void handleButton(const ButtonConfig& bc);
 
     // Toggles media playback (uses playerctl).

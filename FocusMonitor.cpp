@@ -54,6 +54,12 @@ FocusMonitor::FocusMonitor(const std::string& scriptDir, QObject* parent)
             << "                 \"com.audiokontroller.FocusMonitor\", \"SetPID\", window.pid);\n"
             << "    }\n"
             << "});\n";
+        out.flush();
+        if (file.error() != QFile::NoError) {
+            Logger::instance().error("FocusMonitor", "Failed to write KWin script content");
+            file.close();
+            return;
+        }
         file.close();
     } else {
         Logger::instance().error("FocusMonitor", "Failed to write KWin script to " + scriptPath);
@@ -64,7 +70,7 @@ FocusMonitor::FocusMonitor(const std::string& scriptDir, QObject* parent)
     // Try immediately. If KWin isn't on D-Bus yet (startup race), set a timer
     // to retry periodically rather than blocking or failing permanently.
     if (loadKWinScript()) {
-        Logger::instance().warn("FocusMonitor", "KWin focus script loaded");
+        Logger::instance().info("FocusMonitor", "KWin focus script loaded");
     } else {
         Logger::instance().warn("FocusMonitor",
             "KWin not available yet, will retry every 2s (up to 30s)");
@@ -81,8 +87,6 @@ FocusMonitor::~FocusMonitor() {
     QDBusConnection::sessionBus().unregisterService("com.audiokontroller.FocusMonitor");
 }
 
-// Called by the KWin JavaScript script over D-Bus whenever window focus changes.
-// Stores the PID atomically so the HID thread can read it without locking.
 void FocusMonitor::SetPID(int pid) {
     activePID.store(pid, std::memory_order_relaxed);
 }
@@ -98,7 +102,6 @@ void FocusMonitor::retryLoadKWinScript() {
             (retryCount == 1 ? " retry)" : " retries)"));
         return;
     }
-    // If we've exhausted retries, stop trying and log a permanent failure.
     if (retryCount >= MAX_RETRIES) {
         retryTimer.stop();
         Logger::instance().error("FocusMonitor",

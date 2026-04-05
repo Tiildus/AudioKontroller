@@ -45,14 +45,12 @@ bool ConfigManager::load(const std::string& path) {
     config.knobThreshold = root.value("knobThreshold").toInt(4);
     config.logFile      = root.value("logFile").toString("audiokontroller.log").toStdString();
 
-    // Parse each knob entry from the "knobs" JSON array.
     QJsonArray knobsArr = root.value("knobs").toArray();
     config.knobs.clear();
     for (const auto& val : knobsArr) {
         config.knobs.push_back(parseKnob(val.toObject()));
     }
 
-    // Parse each button entry from the "buttons" JSON array.
     QJsonArray buttonsArr = root.value("buttons").toArray();
     config.buttons.clear();
     for (const auto& val : buttonsArr) {
@@ -62,15 +60,13 @@ bool ConfigManager::load(const std::string& path) {
     return true;
 }
 
-// Writes a config file with four knobs (Spotify, Firefox, Discord, focused)
-// and four buttons (play/pause, type text, force close, none) as a starting point.
+// Generates a default config as a starting point for new installs.
 bool ConfigManager::createDefault(const std::string& path) {
     QJsonObject root;
     root["device"]         = "Mini";
     root["knobThreshold"]  = 4;
     root["logFile"]        = "audiokontroller.log";
 
-    // Build the knobs array
     QJsonArray knobs;
     auto makeKnob = [](const QString& type, const QString& target = "") {
         QJsonObject obj;
@@ -78,13 +74,12 @@ bool ConfigManager::createDefault(const std::string& path) {
         if (!target.isEmpty()) obj["target"] = target;
         return obj;
     };
-    knobs.append(makeKnob("app", "firefox"));        // single app
-    knobs.append(makeKnob("app", "discord"));         // single app
+    knobs.append(makeKnob("app", "firefox"));
+    knobs.append(makeKnob("app", "discord"));
     knobs.append(makeKnob("focused"));
     knobs.append(makeKnob("system"));
     root["knobs"] = knobs;
 
-    // Build the buttons array
     QJsonArray buttons;
     {
         QJsonObject b;

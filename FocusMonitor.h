@@ -57,13 +57,11 @@ private Q_SLOTS:
     void retryLoadKWinScript();
 
 private:
-    // Atomic so the HID read thread can call getPID() without a mutex.
     std::atomic<int> activePID{-1};
 
     // ID assigned by KWin when the script is loaded — needed to run and unload it.
     int scriptId = -1;
 
-    // Absolute path to the focus-monitor.js file on disk.
     std::string scriptPath;
 
     // Used to retry the KWin D-Bus call if KWin isn't available at startup.

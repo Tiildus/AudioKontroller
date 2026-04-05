@@ -45,19 +45,18 @@ public:
     void setCallback(CCCallback cb);
     void setButtonCallback(ButtonCallback cb);
 
-    // Spawns the HID read loop in a background thread.
     void startListeningAsync();
     // Sets running=false and joins the background thread (waits for it to exit).
     void stopListening();
     // Signals the read loop to stop. Writes an atomic bool — safe from a signal handler.
     void requestStop() { running = false; }
 
-    // Returns true if the USB device was successfully opened.
     bool isConnected() const { return device != nullptr; }
 
     // Minimum raw value change (0–255 scale) required to fire the knob callback.
     // Filters out electrical noise / jitter from potentiometers at rest.
-    int knobThreshold = 4;
+    // Atomic because it's read from the HID thread in processKnobEvent().
+    std::atomic<int> knobThreshold{4};
 
 private:
     // HID report byte 0 values that identify knob vs button events.
@@ -94,7 +93,6 @@ private:
     void getVidPid(PCPanelDevice type, uint16_t& vid, uint16_t& pid);
     void readLoop(); // runs on readThread
 
-    // Extracted from readLoop for clarity:
     bool handleHidError(int& consecutiveErrors);
     void processKnobEvent(uint8_t index, uint8_t value);
     void processButtonEvent(uint8_t index, uint8_t value);

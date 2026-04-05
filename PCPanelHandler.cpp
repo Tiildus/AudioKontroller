@@ -38,8 +38,8 @@ PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
 
 PCPanelHandler::~PCPanelHandler() {
     stopListening(); // join the thread before closing the device handle
-    device.reset();  // close HID device before shutting down hidapi
-    hid_exit();      // clean up hidapi/libusb resources
+    device.reset();
+    hid_exit();
 }
 
 void PCPanelHandler::setCallback(CCCallback cb)           { callback = cb; }
@@ -67,6 +67,7 @@ void PCPanelHandler::getVidPid(PCPanelDevice type, uint16_t& vid, uint16_t& pid)
         case PCPanelDevice::Mini: vid = 0x0483; pid = 0xA3C4; break;
         case PCPanelDevice::Pro:  vid = 0x0483; pid = 0xA3C5; break;
         case PCPanelDevice::RGB:  vid = 0x04D8; pid = 0xEB42; break;
+        default:                  vid = 0x0483; pid = 0xA3C4; break; // fallback to Mini
     }
 }
 

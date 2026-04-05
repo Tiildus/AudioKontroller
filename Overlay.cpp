@@ -7,7 +7,7 @@
 #include <QDBusConnection>
 
 void Overlay::showVolume(float volume) {
-    int percent = static_cast<int>(volume * 100.0f);
+    int percent = static_cast<int>(volume * 100.0f + 0.5f);
     showKDEOSD("Volume", QString::number(percent) + "%");
 }
 

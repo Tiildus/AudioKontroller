@@ -49,7 +49,6 @@ public:
     void setSystemVolume(float volume);
 
 private:
-    // Holds the injected PID-lookup function for "focused" knob type.
     std::function<int()> getPID;
 
     // pa_threaded_mainloop owns its own thread and exposes lock/unlock so
@@ -67,8 +66,8 @@ private:
     // These fields describe the current volume request. They are only written
     // while holding the mainloop lock, and only read from inside PA callbacks
     // (which also run under the lock), so no extra synchronization is needed.
-    std::vector<std::string> targetApps;  // non-empty when matching by name(s)
-    bool isSystem = false;   // true when targeting the default output device
+    std::vector<std::string> targetApps;
+    bool isSystem = false;
     float targetVolume = 1.0f;
 
     // Called by PulseAudio when the context state changes (connecting, ready, failed).
@@ -88,8 +87,6 @@ private:
     // Must be called with the mainloop lock held.
     void requestSinkInputs();
 
-    // Kicks off a PA request to query the default output device.
-    // The result is delivered asynchronously to sinkInfoCallback.
     // Must be called with the mainloop lock held.
     void requestSinkInfo();
 };

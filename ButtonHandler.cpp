@@ -76,24 +76,13 @@ const std::unordered_map<std::string, int> ButtonHandler::keyMap = {
     {"stop",       166},
 };
 
-// Spawns an external program without going through a shell.
-// Steps:
-//   1. fork() duplicates this process. Both parent and child continue here.
-//   2. In the child (pid == 0): build a null-terminated C argv array and call
-//      execvp(), which replaces the child process image with the new program.
-//   3. In the parent: fork() returns the child's PID. We ignore it and return.
-//
-// SA_NOCLDWAIT (set in main.cpp) prevents the child from becoming a zombie
-// after it exits, since we never call wait() on it.
-//
-// We use _exit() instead of exit() in the child's error path because exit()
-// flushes C++ destructors and stdio buffers from the parent process — running
-// those in a forked child would corrupt shared file handles.
+// Spawns an external program via fork/exec (no shell — immune to injection).
+// SA_NOCLDWAIT (set in main.cpp) prevents zombies since we never call wait().
+// _exit() is used instead of exit() in the child to avoid flushing the
+// parent's stdio buffers or running its destructors.
 void ButtonHandler::forkExec(const std::vector<std::string>& argv) {
     pid_t pid = fork();
     if (pid == 0) {
-        // Child process: build a null-terminated C-style argv array.
-        // execvp() requires this format.
         std::vector<const char*> args;
         for (const auto& a : argv) args.push_back(a.c_str());
         args.push_back(nullptr);
@@ -104,7 +93,6 @@ void ButtonHandler::forkExec(const std::vector<std::string>& argv) {
     // Parent returns immediately. No wait() needed thanks to SA_NOCLDWAIT.
 }
 
-// Dispatches a button press to the appropriate action based on config.
 void ButtonHandler::handleButton(const ButtonConfig& bc) {
     if (bc.action == "mediaPlayPause") {
         toggleMediaPlayPause();
@@ -148,12 +136,10 @@ void ButtonHandler::sendKeySequence(const std::vector<std::string>& args) {
 //   "ctrl+grave" -> ydotool key 29:1 41:1 41:0 29:0
 //   (press ctrl, press grave, release grave, release ctrl)
 void ButtonHandler::sendKeyCombo(const std::string& combo) {
-    // Split on "+" and look up each key name
     std::vector<int> codes;
     std::istringstream stream(combo);
     std::string token;
     while (std::getline(stream, token, '+')) {
-        // Trim whitespace and convert to lowercase for case-insensitive lookup
         auto start = token.find_first_not_of(' ');
         auto end = token.find_last_not_of(' ');
         if (start == std::string::npos) continue;
