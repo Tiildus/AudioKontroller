@@ -9,7 +9,7 @@
 // Usage:
 //   AudioHandler audio;
 //   audio.init();                               // connect to PulseAudio
-//   audio.setVolumeForApp("firefox", 0.5f);     // 50% volume for Firefox
+//   audio.setVolumeForApps({"firefox"}, 0.5f);   // 50% volume for Firefox
 //   audio.setVolumeForPID(1234, 0.75f);         // 75% volume for PID 1234
 //   audio.setSystemVolume(0.8f);                // 80% master/system volume
 // =============================================================================

@@ -13,6 +13,7 @@
 #include "Logger.h"
 #include <algorithm>
 #include <cctype>
+#include <cstdio>    // fopen, fgets, fclose
 
 // Case-insensitive substring check: returns true if haystack contains needle
 // (ignoring capitalization). For example, "Discord" contains "discord".
@@ -23,6 +24,34 @@ static bool containsIgnoreCase(const std::string& haystack, const std::string& n
                           [](char a, char b) { return std::tolower(static_cast<unsigned char>(a))
                                                    == std::tolower(static_cast<unsigned char>(b)); });
     return it != haystack.end();
+}
+
+// Reads /proc/<pid>/comm to get the process's binary name (e.g. "discord",
+// "firefox"). Returns an empty string on failure. This is the same name that
+// PulseAudio typically reports as "application.process.binary" for audio
+// streams, so we can use it with the existing name-matching logic.
+//
+// This solves the "focused knob doesn't work for Electron apps" problem:
+// instead of matching by PID (which differs between the window-owning process
+// and the audio child process), we resolve the focused window's PID to a name
+// and match by name — the same path that "app" type knobs use.
+static std::string getProcessName(uint32_t pid) {
+    char path[64];
+    snprintf(path, sizeof(path), "/proc/%u/comm", pid);
+
+    FILE* f = fopen(path, "r");
+    if (!f) return {};  // process exited or no permission
+
+    char buf[256];
+    if (!fgets(buf, sizeof(buf), f)) { fclose(f); return {}; }
+    fclose(f);
+
+    // fgets includes the trailing newline — strip it.
+    std::string name(buf);
+    while (!name.empty() && (name.back() == '\n' || name.back() == '\r'))
+        name.pop_back();
+
+    return name;
 }
 
 bool AudioHandler::init() {
@@ -182,12 +211,26 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
 // Dispatches a knob event: routes to the appropriate volume method
 // based on the knob's config type.
 void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
+    volume = std::clamp(volume, 0.0f, 1.0f);
     if (kc.type == "app") {
         setVolumeForApps(kc.targets, volume);
     } else if (kc.type == "focused") {
         if (getPID) {
             int pid = getPID();
-            if (pid > 0) setVolumeForPID(static_cast<uint32_t>(pid), volume);
+            if (pid > 0) {
+                // Resolve the focused window's PID to a process name and match
+                // by name instead of PID. This handles Electron/Chromium apps
+                // (Discord, VS Code, etc.) where the window-owning process and
+                // the audio-playing process are different PIDs but share the
+                // same binary name in PulseAudio.
+                std::string name = getProcessName(static_cast<uint32_t>(pid));
+                if (!name.empty()) {
+                    setVolumeForApps({name}, volume);
+                } else {
+                    // Fallback: if /proc read failed, try direct PID match
+                    setVolumeForPID(static_cast<uint32_t>(pid), volume);
+                }
+            }
         }
     } else if (kc.type == "system") {
         setSystemVolume(volume);
