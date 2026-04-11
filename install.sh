@@ -2,11 +2,11 @@
 set -e
 
 APP_NAME="AudioKontroller"
-DAEMON_NAME="audiokontrollerd"
+BIN_NAME="audiokontroller"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$REPO_DIR/build"
-INSTALL_DIR="$HOME/.local/bin/$APP_NAME.d"
-INSTALL_BIN="$INSTALL_DIR/$DAEMON_NAME"
+INSTALL_DIR="$HOME/.local/bin/audiokontroller"
+INSTALL_BIN="$INSTALL_DIR/$BIN_NAME"
 INSTALL_CONFIG="$INSTALL_DIR/config.json"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/audiokontroller.service"
@@ -52,10 +52,16 @@ sudo udevadm control --reload
 sudo udevadm trigger
 
 # --- ydotool daemon service ---
-# Overwriting the service file and re-enabling is idempotent.
+# Use ydotool's own user-level service if available (Arch);
+# otherwise create one. A user-level service is preferred over the
+# system-level service Fedora ships — root bypasses the uinput group
+# permission check on /dev/uinput, undermining the udev rule.
 echo "Setting up ydotool service..."
 mkdir -p "$SERVICE_DIR"
-cat > "$SERVICE_DIR/ydotoold.service" << 'EOF'
+if systemctl --user cat ydotool.service &>/dev/null; then
+    systemctl --user enable --now ydotool.service || true
+else
+    cat > "$SERVICE_DIR/ydotoold.service" << 'EOF'
 [Unit]
 Description=Ydotool user-level daemon
 After=graphical-session.target
@@ -68,8 +74,9 @@ RestartSec=5
 [Install]
 WantedBy=default.target
 EOF
-systemctl --user daemon-reload
-systemctl --user enable --now ydotoold.service || true
+    systemctl --user daemon-reload
+    systemctl --user enable --now ydotoold.service || true
+fi
 
 # --- Build ---
 # 'make' is incremental — only changed files are recompiled.
@@ -86,7 +93,7 @@ echo "Installing to $INSTALL_DIR/"
 mkdir -p "$INSTALL_DIR"
 systemctl --user stop audiokontroller.service 2>/dev/null || true
 
-cp "$BUILD_DIR/$DAEMON_NAME" "$INSTALL_BIN"
+cp "$BUILD_DIR/$BIN_NAME" "$INSTALL_BIN"
 chmod +x "$INSTALL_BIN"
 
 # Config is the only file we guard — the user edits this, so never overwrite it.
@@ -95,30 +102,12 @@ if [ ! -f "$INSTALL_CONFIG" ]; then
     echo "Config copied to $INSTALL_CONFIG"
 fi
 
-# --- CLI wrapper ---
-# Overwriting with the same content every run is harmless.
-echo "Installing CLI wrapper..."
-cat > "$HOME/.local/bin/AudioKontroller" << 'WRAPPER_EOF'
-#!/bin/bash
-INSTALL_DIR="$HOME/.local/bin/AudioKontroller.d"
-SERVICE="audiokontroller.service"
-CONFIG="$INSTALL_DIR/config.json"
-LOG="$INSTALL_DIR/audiokontroller.log"
-
-case "$1" in
-    start)   systemctl --user start "$SERVICE" ;;
-    stop)    systemctl --user stop "$SERVICE" ;;
-    restart) systemctl --user restart "$SERVICE" ;;
-    status)  systemctl --user status "$SERVICE" ;;
-    config)  ${EDITOR:-nano} "$CONFIG" ;;
-    log)     less +G "$LOG" ;;
-    *)
-        echo "Usage: AudioKontroller {start|stop|restart|status|config|log}"
-        exit 1
-        ;;
-esac
-WRAPPER_EOF
-chmod +x "$HOME/.local/bin/AudioKontroller"
+# --- CLI symlink ---
+# The binary handles subcommands directly (start, stop, config, etc.).
+# The symlink gives it the user-facing name "AudioKontroller".
+# /proc/self/exe resolves through symlinks, so resolveInstallDir() still
+# returns the correct directory.
+ln -sf "$INSTALL_BIN" "$HOME/.local/bin/AudioKontroller"
 
 # --- systemd service ---
 # Overwriting and reloading is idempotent.
@@ -126,7 +115,7 @@ echo "Creating user service..."
 cat > "$SERVICE_FILE" << EOF
 [Unit]
 Description=AudioKontroller background service
-After=graphical-session.target ydotoold.service
+After=graphical-session.target ydotool.service ydotoold.service
 
 [Service]
 Type=simple

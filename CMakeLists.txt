@@ -22,7 +22,7 @@ include_directories(
     ${PULSE_INCLUDE_DIRS}
 )
 
-add_executable(audiokontrollerd
+add_executable(audiokontroller
     main.cpp
     PCPanelHandler.cpp PCPanelHandler.h
     AudioHandler.cpp AudioHandler.h
@@ -33,15 +33,32 @@ add_executable(audiokontrollerd
     Logger.cpp Logger.h
 )
 
-target_compile_options(audiokontrollerd PRIVATE
+target_compile_options(audiokontroller PRIVATE
     -Wall -Wextra -fstack-protector-strong -D_FORTIFY_SOURCE=2)
-target_link_options(audiokontrollerd PRIVATE
+target_link_options(audiokontroller PRIVATE
     -Wl,-z,relro -Wl,-z,now)
 
-target_link_libraries(audiokontrollerd
+target_link_libraries(audiokontroller
     Qt6::Core
     Qt6::DBus
     ${HIDAPI_LIBRARIES}
     ${PULSE_LIBRARIES}
     pthread
 )
+
+# --- System install (RPM packaging) ---
+# Only active when -DSYSTEM_INSTALL=ON is passed. install.sh builds are unaffected.
+option(SYSTEM_INSTALL "Install to system paths for RPM packaging" OFF)
+
+if(SYSTEM_INSTALL)
+    include(GNUInstallDirs)
+    install(TARGETS audiokontroller DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/audiokontroller)
+    install(FILES packaging/rpm/config.json
+            DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/audiokontroller)
+    install(FILES packaging/rpm/audiokontroller.service
+                  packaging/rpm/ydotoold.service
+            DESTINATION lib/systemd/user)
+    install(FILES packaging/rpm/99-audiokontroller-uinput.rules
+                  packaging/rpm/99-audiokontroller-pcpanel.rules
+            DESTINATION lib/udev/rules.d)
+endif()

@@ -1,0 +1,17 @@
+{
+    "device": "Mini",
+    "knobThreshold": 4,
+    "logFile": "~/.local/state/audiokontroller/audiokontroller.log",
+    "knobs": [
+        { "type": "app", "target": "firefox" },
+        { "type": "app", "target": "discord" },
+        { "type": "focused" },
+        { "type": "system" }
+    ],
+    "buttons": [
+        { "action": "mediaPlayPause" },
+        { "action": "sendKeys", "keys": "ctrl+grave" },
+        { "action": "none" },
+        { "action": "forceClose" }
+    ]
+}

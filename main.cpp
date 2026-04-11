@@ -20,6 +20,7 @@
 #include <cstdlib>
 #include <iostream>
 #include <memory>
+#include <unistd.h>
 
 // Expands a leading "~/" to the user's home directory.
 // PulseAudio and other tools use this convention; the C runtime does not
@@ -38,6 +39,83 @@ static PCPanelDevice deviceFromString(const std::string& name) {
     return PCPanelDevice::Mini;
 }
 
+// Resolves the directory the binary lives in via /proc/self/exe.
+// Used by the config and log subcommands to find files in the install.sh layout.
+static std::string resolveInstallDir() {
+    std::unique_ptr<char, decltype(&free)> exePath(realpath("/proc/self/exe", nullptr), &free);
+    if (exePath) {
+        std::string exeStr(exePath.get());
+        auto lastSlash = exeStr.rfind('/');
+        if (lastSlash != std::string::npos) return exeStr.substr(0, lastSlash);
+    }
+    return ".";
+}
+
+// --- CLI subcommands ---
+// When invoked with a recognized subcommand, the binary execs into the
+// appropriate tool (systemctl, editor, less) and never returns.
+// Unrecognized arguments fall through to daemon mode.
+static constexpr const char* SERVICE_NAME = "audiokontroller.service";
+static constexpr const char* SYSTEM_CONFIG = "/etc/audiokontroller/config.json";
+
+// Finds the config file. RPM installs put it at /etc/audiokontroller/;
+// install.sh puts it next to the binary.
+static std::string resolveConfigPath() {
+    if (access(SYSTEM_CONFIG, F_OK) == 0) return SYSTEM_CONFIG;
+    return resolveInstallDir() + "/config.json";
+}
+
+// Finds the log file. RPM installs use ~/.local/state/audiokontroller/;
+// install.sh puts it next to the binary.
+static std::string resolveLogPath() {
+    const char* home = std::getenv("HOME");
+    if (home) {
+        std::string rpmLog = std::string(home) + "/.local/state/audiokontroller/audiokontroller.log";
+        if (access(rpmLog.c_str(), F_OK) == 0) return rpmLog;
+    }
+    return resolveInstallDir() + "/audiokontroller.log";
+}
+
+static void printUsage() {
+    std::cerr << "Usage: AudioKontroller {start|stop|restart|status|config|log}\n"
+              << "       AudioKontroller [config-path]   (run as daemon)\n";
+}
+
+static void handleSubcommand(int argc, char* argv[]) {
+    if (argc < 2) return;
+
+    std::string cmd = argv[1];
+
+    if (cmd == "start" || cmd == "stop" || cmd == "restart") {
+        execlp("systemctl", "systemctl", "--user", cmd.c_str(), SERVICE_NAME, nullptr);
+        perror("execlp systemctl");
+        _exit(1);
+    }
+    if (cmd == "status") {
+        execlp("systemctl", "systemctl", "--user", "status", SERVICE_NAME, nullptr);
+        perror("execlp systemctl");
+        _exit(1);
+    }
+    if (cmd == "config") {
+        std::string path = resolveConfigPath();
+        const char* editor = std::getenv("EDITOR");
+        if (!editor) editor = "nano";
+        execlp(editor, editor, path.c_str(), nullptr);
+        perror("execlp editor");
+        _exit(1);
+    }
+    if (cmd == "log") {
+        std::string path = resolveLogPath();
+        execlp("less", "less", "+G", path.c_str(), nullptr);
+        perror("execlp less");
+        _exit(1);
+    }
+    if (cmd == "--help" || cmd == "-h") {
+        printUsage();
+        _exit(0);
+    }
+}
+
 // --- Signal handling ---
 // Signal handlers run asynchronously and cannot safely call most functions.
 // We keep a plain global pointer so the handler can call requestStop()
@@ -50,6 +128,9 @@ static void signalHandler(int) {
 }
 
 int main(int argc, char *argv[]) {
+    handleSubcommand(argc, argv);
+
+    // --- Daemon mode ---
     // QCoreApplication is required for Qt's D-Bus support. It sets up the
     // event loop that FocusMonitor uses to receive callbacks from KWin and
     // to fire its retry timer.
@@ -82,17 +163,6 @@ int main(int argc, char *argv[]) {
     Logger::instance().init(expandHome(cfg.logFile));
     Logger::instance().info("Main", "Config loaded from " + configPath);
 
-    // Determine the directory the binary lives in so FocusMonitor knows where
-    // to write its KWin script file. /proc/self/exe is a symlink to the
-    // current executable on Linux.
-    std::string installDir = ".";
-    std::unique_ptr<char, decltype(&free)> exePath(realpath("/proc/self/exe", nullptr), &free);
-    if (exePath) {
-        std::string exeStr(exePath.get());
-        auto lastSlash = exeStr.rfind('/');
-        if (lastSlash != std::string::npos) installDir = exeStr.substr(0, lastSlash);
-    }
-
     // Construct all subsystems. The order matters for destruction (LIFO):
     // panel must be stopped before audio is torn down.
     Overlay overlay;
@@ -101,7 +171,7 @@ int main(int argc, char *argv[]) {
         Logger::instance().warn("Main", "PulseAudio unavailable, volume control disabled");
     }
     ButtonHandler button;
-    FocusMonitor focusMonitor(installDir); // registers D-Bus service, loads KWin script
+    FocusMonitor focusMonitor; // registers D-Bus service, loads KWin script
 
     // Inject FocusMonitor's PID lookup into ButtonHandler and AudioHandler so they
     // can access the focused window's PID without depending on FocusMonitor directly.
@@ -124,6 +194,10 @@ int main(int argc, char *argv[]) {
     Logger::instance().info("Main", std::string("PCPanel: ") + (panel.isConnected() ? "connected" : "not found"));
     Logger::instance().info("Main", std::string("PulseAudio: ") + (audio.isConnected() ? "connected" : "unavailable"));
     Logger::instance().info("Main", std::string("FocusMonitor: ") + (focusMonitor.isScriptLoaded() ? "active" : "pending/failed"));
+
+    // Flush startup messages so they're visible immediately in the log.
+    // Normal runtime INFO messages stay buffered for performance.
+    Logger::instance().flush();
 
     // --- Knob callback (HID read thread) ---
     panel.setCallback([&](int knob, float vol) {

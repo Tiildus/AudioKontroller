@@ -1,0 +1,15 @@
+[Unit]
+Description=AudioKontroller background service
+After=graphical-session.target ydotool.service ydotoold.service
+
+[Service]
+Type=simple
+ExecStart=/usr/libexec/audiokontroller/audiokontroller /etc/audiokontroller/config.json
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+ProtectSystem=strict
+ReadWritePaths=%h/.local/state/audiokontroller
+
+[Install]
+WantedBy=default.target

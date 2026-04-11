@@ -34,9 +34,7 @@ class FocusMonitor : public QObject {
     Q_CLASSINFO("D-Bus Interface", "com.audiokontroller.FocusMonitor")
 
 public:
-    // scriptDir: directory where focus-monitor.js will be written.
-    //            Should be the install directory so it persists across runs.
-    explicit FocusMonitor(const std::string& scriptDir, QObject* parent = nullptr);
+    explicit FocusMonitor(QObject* parent = nullptr);
     ~FocusMonitor();
 
     // Returns the PID of the currently focused window, or -1 if unknown.

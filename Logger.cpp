@@ -6,6 +6,7 @@
 #include <iostream>
 #include <chrono>
 #include <ctime>
+#include <filesystem>
 #include <iomanip>
 #include <sstream>
 
@@ -21,6 +22,14 @@ Logger& Logger::instance() {
 // over multiple restarts during a long day.
 void Logger::init(const std::string& filePath) {
     std::lock_guard<std::mutex> lock(mtx);
+
+    // Create parent directories if they don't exist (e.g. ~/.local/state/audiokontroller/).
+    auto parent = std::filesystem::path(filePath).parent_path();
+    if (!parent.empty()) {
+        std::error_code ec;
+        std::filesystem::create_directories(parent, ec);
+    }
+
     file.open(filePath, std::ios::trunc);
     if (!file.is_open()) {
         std::cerr << "Failed to open log file: " << filePath << "\n";
@@ -46,6 +55,11 @@ void Logger::log(LogLevel level, const std::string& tag, const std::string& mess
 void Logger::info(const std::string& tag,  const std::string& message) { log(LogLevel::INFO, tag, message); }
 void Logger::warn(const std::string& tag,  const std::string& message) { log(LogLevel::WARN, tag, message); }
 void Logger::error(const std::string& tag, const std::string& message) { log(LogLevel::ERROR, tag, message); }
+
+void Logger::flush() {
+    std::lock_guard<std::mutex> lock(mtx);
+    if (initialized && file.is_open()) file.flush();
+}
 
 // Produces a timestamp string like "2025-04-04 14:23:01.042".
 // Millisecond precision helps correlate log events when debugging timing issues.

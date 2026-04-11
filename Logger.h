@@ -37,6 +37,7 @@ public:
     void info(const std::string& tag,  const std::string& message);
     void warn(const std::string& tag,  const std::string& message);
     void error(const std::string& tag, const std::string& message);
+    void flush();
 
 private:
     Logger() = default; // private: use instance() to access
