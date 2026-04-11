@@ -39,9 +39,10 @@ public:
     // ydotool key code:state arguments and executes it.
     void sendKeyCombo(const std::string& combo);
 
-    // Sends SIGTERM to the focused window's process, waits 1 second,
-    // then sends SIGKILL if it hasn't exited. Runs in a detached thread
-    // so the HID loop is not blocked during the 1-second grace period.
+    // Checks the focused process against a blocklist of protected system
+    // processes (KDE, Wayland, audio stack, etc.). If safe, sends SIGTERM,
+    // waits 10 seconds, then sends SIGKILL if it hasn't exited. Runs in a
+    // detached thread so the HID loop is not blocked during the grace period.
     void forceCloseFocusedWindow();
 
 private:

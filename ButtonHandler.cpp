@@ -11,6 +11,55 @@
 #include <sstream>
 #include <algorithm>
 #include <cctype>
+#include <fstream>
+#include <unordered_set>
+
+// Processes that should never be force-closed on KDE Wayland / Fedora.
+// Killing any of these could crash the desktop session, corrupt system state,
+// or cause hardware/audio issues that require a reboot or logout to recover.
+static const std::unordered_set<std::string> closeBlocklist = {
+    // KDE Plasma shell & compositing
+    "plasmashell",       // KDE desktop shell (panels, widgets) — kill = no taskbar/desktop
+    "kwin_wayland",      // KDE Wayland compositor — kill = entire graphical session dies
+    "kwin_x11",          // KDE X11 compositor (fallback sessions)
+    "ksmserver",         // KDE session manager — kill = can't log out cleanly
+    "kded6",             // KDE daemon framework — hosts many background services
+    "kded5",
+    "kdeinit5",          // KDE process launcher
+    "kdeinit6",
+
+    // Wayland / display infrastructure
+    "kwayland_seat",     // Wayland seat management
+    "xwaylandvideobridge", // screen sharing bridge
+
+    // Core system / init
+    "systemd",           // PID 1 — killing this halts the OS
+    "dbus-daemon",       // IPC bus — killing kills nearly every desktop service
+    "dbus-broker",       // alternative D-Bus implementation used on Fedora
+
+    // Audio stack — killing these mutes all audio until restarted
+    "pipewire",
+    "pipewire-pulse",    // PipeWire PulseAudio compatibility layer
+    "wireplumber",       // PipeWire session/policy manager
+    "pulseaudio",        // legacy, but occasionally still running
+
+    // Login / authentication
+    "sddm",              // display manager — kill = login screen gone
+    "polkit-kde-authentication-agent-1", // privilege auth dialogs
+    "polkitd",
+
+    // NetworkManager — killing drops all network connections
+    "NetworkManager",
+    "nm-applet",
+
+    // Fedora-specific background services
+    "abrtd",             // crash reporter daemon
+    "packagekitd",       // package management — kill mid-operation = broken packages
+    "dnf",               // package manager — kill mid-install = broken packages
+
+    // AudioKontroller itself — prevent accidental self-termination
+    "audiokontroller",
+};
 
 // Key name to Linux keycode mapping (from linux/input-event-codes.h).
 // ydotool uses these numeric codes in the format "CODE:1" (press) / "CODE:0" (release).
@@ -168,13 +217,23 @@ void ButtonHandler::sendKeyCombo(const std::string& combo) {
     Logger::instance().info("ButtonHandler", "Dispatched combo: " + combo);
 }
 
+// Reads /proc/<pid>/comm to get the process name (no trailing newline).
+// Returns an empty string if the file can't be read (e.g. process already gone).
+static std::string procName(int pid) {
+    std::ifstream f("/proc/" + std::to_string(pid) + "/comm");
+    std::string name;
+    std::getline(f, name);
+    return name;
+}
+
 // Gracefully terminates the focused window's process:
-//   1. SIGTERM — politely asks the process to exit (it can save state, etc.)
-//   2. Wait 1 second.
-//   3. If still running, SIGKILL — forcibly terminates it.
+//   1. Checks /proc/<pid>/comm against closeBlocklist — aborts if matched.
+//   2. SIGTERM — politely asks the process to exit (it can save state, etc.)
+//   3. Wait 10 seconds.
+//   4. If still running, SIGKILL — forcibly terminates it.
 //
-// This runs in a detached thread so the 1-second sleep doesn't stall the
-// HID read loop (which would make knobs and other buttons feel unresponsive).
+// This runs in a detached thread so the sleep doesn't stall the HID read loop
+// (which would make knobs and other buttons feel unresponsive).
 void ButtonHandler::forceCloseFocusedWindow() {
     if (!getPID) {
         Logger::instance().warn("ButtonHandler", "No PID source configured");
@@ -186,14 +245,25 @@ void ButtonHandler::forceCloseFocusedWindow() {
         return;
     }
 
-    std::thread([pid]() {
+    std::string name = procName(pid);
+    if (closeBlocklist.count(name)) {
+        Logger::instance().warn("ButtonHandler",
+            "Blocked force-close of protected process: " + name +
+            " (PID " + std::to_string(pid) + ")");
+        return;
+    }
+
+    std::thread([pid, name]() {
         kill(pid, SIGTERM);
-        std::this_thread::sleep_for(std::chrono::milliseconds(1000));
+        Logger::instance().info("ButtonHandler",
+            "Sent SIGTERM to " + name + " (PID " + std::to_string(pid) + ")");
+        std::this_thread::sleep_for(std::chrono::seconds(10));
         // kill(pid, 0) doesn't send a signal; it just checks if the process
         // still exists. Returns 0 if it does, -1 if it's gone.
         if (kill(pid, 0) == 0) {
             kill(pid, SIGKILL);
+            Logger::instance().info("ButtonHandler",
+                "Sent SIGKILL to " + name + " (PID " + std::to_string(pid) + ")");
         }
-        Logger::instance().info("ButtonHandler", "Force closed PID: " + std::to_string(pid));
     }).detach(); // detach so this thread cleans itself up when done
 }
