@@ -16,6 +16,7 @@
 #include "ConfigManager.h"
 #include "Logger.h"
 #include <QCoreApplication>
+#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -170,7 +171,7 @@ int main(int argc, char *argv[]) {
     audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
 
     PCPanelHandler panel(deviceFromString(cfg.device));
-    panel.knobThreshold = cfg.knobThreshold;
+    panel.knobThreshold = std::clamp(cfg.knobThreshold, 0, 50);
 
     // Register signal handlers after all objects are constructed so
     // globalPanel is valid before any signal could arrive.

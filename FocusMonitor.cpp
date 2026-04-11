@@ -9,6 +9,7 @@
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
+#include <sys/stat.h>
 #include <unistd.h>
 
 // KWin's D-Bus service and scripting interface constants.
@@ -32,6 +33,7 @@ FocusMonitor::FocusMonitor(QObject* parent)
         scriptDir = "/tmp/audiokontroller-" + std::to_string(getuid());
     }
     QDir().mkpath(QString::fromStdString(scriptDir));
+    chmod(scriptDir.c_str(), 0700);
     scriptPath = scriptDir + "/focus-monitor.js";
 
     // --- Register our D-Bus presence ---
@@ -144,7 +146,12 @@ bool FocusMonitor::loadKWinScript() {
     QString scriptObjPath = QString("/Scripting/Script%1").arg(scriptId);
     QDBusMessage runMsg = QDBusMessage::createMethodCall(
         KWIN_SERVICE, scriptObjPath, "org.kde.kwin.Script", "run");
-    QDBusConnection::sessionBus().call(runMsg);
+    QDBusReply<void> runReply = QDBusConnection::sessionBus().call(runMsg);
+    if (!runReply.isValid()) {
+        Logger::instance().warn("FocusMonitor",
+            "KWin script loaded but run() failed: " +
+            runReply.error().message().toStdString());
+    }
 
     return true;
 }

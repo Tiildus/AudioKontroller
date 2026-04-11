@@ -5,9 +5,7 @@
 #include "ButtonHandler.h"
 #include "Logger.h"
 #include <unistd.h>   // fork, execvp, _exit
-#include <signal.h>   // kill, SIGTERM, SIGKILL
-#include <thread>
-#include <chrono>
+#include <signal.h>   // kill, SIGTERM
 #include <sstream>
 #include <algorithm>
 #include <cctype>
@@ -226,14 +224,9 @@ static std::string procName(int pid) {
     return name;
 }
 
-// Gracefully terminates the focused window's process:
+// Terminates the focused window's process:
 //   1. Checks /proc/<pid>/comm against closeBlocklist — aborts if matched.
 //   2. SIGTERM — politely asks the process to exit (it can save state, etc.)
-//   3. Wait 10 seconds.
-//   4. If still running, SIGKILL — forcibly terminates it.
-//
-// This runs in a detached thread so the sleep doesn't stall the HID read loop
-// (which would make knobs and other buttons feel unresponsive).
 void ButtonHandler::forceCloseFocusedWindow() {
     if (!getPID) {
         Logger::instance().warn("ButtonHandler", "No PID source configured");
@@ -253,17 +246,15 @@ void ButtonHandler::forceCloseFocusedWindow() {
         return;
     }
 
-    std::thread([pid, name]() {
-        kill(pid, SIGTERM);
-        Logger::instance().info("ButtonHandler",
-            "Sent SIGTERM to " + name + " (PID " + std::to_string(pid) + ")");
-        std::this_thread::sleep_for(std::chrono::seconds(10));
-        // kill(pid, 0) doesn't send a signal; it just checks if the process
-        // still exists. Returns 0 if it does, -1 if it's gone.
-        if (kill(pid, 0) == 0) {
-            kill(pid, SIGKILL);
-            Logger::instance().info("ButtonHandler",
-                "Sent SIGKILL to " + name + " (PID " + std::to_string(pid) + ")");
-        }
-    }).detach(); // detach so this thread cleans itself up when done
+    // Re-check that the PID still belongs to the same process (guards against
+    // PID reuse between the blocklist check above and the kill below).
+    if (procName(pid) != name) {
+        Logger::instance().warn("ButtonHandler",
+            "PID " + std::to_string(pid) + " was reused, aborting kill");
+        return;
+    }
+
+    kill(pid, SIGTERM);
+    Logger::instance().info("ButtonHandler",
+        "Sent SIGTERM to " + name + " (PID " + std::to_string(pid) + ")");
 }

@@ -72,7 +72,13 @@ bool AudioHandler::init() {
     pa_context_set_state_callback(context, &AudioHandler::contextStateCallback, this);
 
     pa_context_connect(context, nullptr, PA_CONTEXT_NOFLAGS, nullptr);
-    pa_threaded_mainloop_start(mainloop.get());
+    if (pa_threaded_mainloop_start(mainloop.get()) < 0) {
+        Logger::instance().error("Audio", "Failed to start PulseAudio mainloop");
+        pa_context_unref(context);
+        context = nullptr;
+        mainloop.reset();
+        return false;
+    }
 
     // Wait here until the context reaches READY (or a failure state).
     // We must hold the lock while waiting so that PA doesn't race with us.
