@@ -23,8 +23,7 @@ FocusMonitor::FocusMonitor(QObject* parent)
     : QObject(parent)
 {
     // Write the KWin script to a runtime directory rather than alongside the
-    // binary. This works for both RPM installs (where the binary dir is
-    // read-only) and install.sh installs.
+    // binary, so it works regardless of where the binary is installed.
     std::string scriptDir;
     const char* xdgRuntime = std::getenv("XDG_RUNTIME_DIR");
     if (xdgRuntime) {

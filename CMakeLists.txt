@@ -45,20 +45,3 @@ target_link_libraries(audiokontroller
     ${PULSE_LIBRARIES}
     pthread
 )
-
-# --- System install (RPM packaging) ---
-# Only active when -DSYSTEM_INSTALL=ON is passed. install.sh builds are unaffected.
-option(SYSTEM_INSTALL "Install to system paths for RPM packaging" OFF)
-
-if(SYSTEM_INSTALL)
-    include(GNUInstallDirs)
-    install(TARGETS audiokontroller DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/audiokontroller)
-    install(FILES packaging/rpm/config.json
-            DESTINATION ${CMAKE_INSTALL_SYSCONFDIR}/audiokontroller)
-    install(FILES packaging/rpm/audiokontroller.service
-                  packaging/rpm/ydotoold.service
-            DESTINATION lib/systemd/user)
-    install(FILES packaging/rpm/99-audiokontroller-uinput.rules
-                  packaging/rpm/99-audiokontroller-pcpanel.rules
-            DESTINATION lib/udev/rules.d)
-endif()

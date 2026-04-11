@@ -17,6 +17,7 @@
 #include "Logger.h"
 #include <QCoreApplication>
 #include <csignal>
+#include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <memory>
@@ -56,23 +57,13 @@ static std::string resolveInstallDir() {
 // appropriate tool (systemctl, editor, less) and never returns.
 // Unrecognized arguments fall through to daemon mode.
 static constexpr const char* SERVICE_NAME = "audiokontroller.service";
-static constexpr const char* SYSTEM_CONFIG = "/etc/audiokontroller/config.json";
 
-// Finds the config file. RPM installs put it at /etc/audiokontroller/;
-// install.sh puts it next to the binary.
+// Config and log files live next to the binary (install.sh layout).
 static std::string resolveConfigPath() {
-    if (access(SYSTEM_CONFIG, F_OK) == 0) return SYSTEM_CONFIG;
     return resolveInstallDir() + "/config.json";
 }
 
-// Finds the log file. RPM installs use ~/.local/state/audiokontroller/;
-// install.sh puts it next to the binary.
 static std::string resolveLogPath() {
-    const char* home = std::getenv("HOME");
-    if (home) {
-        std::string rpmLog = std::string(home) + "/.local/state/audiokontroller/audiokontroller.log";
-        if (access(rpmLog.c_str(), F_OK) == 0) return rpmLog;
-    }
     return resolveInstallDir() + "/audiokontroller.log";
 }
 
@@ -207,8 +198,31 @@ int main(int argc, char *argv[]) {
 
         // System volume already triggers KDE's own OSD, so skip ours to
         // avoid showing two overlapping popups at the same time.
-        if (cfg.knobs[knob].type != "system")
-            overlay.showVolume(vol);
+        if (cfg.knobs[knob].type != "system") {
+            const auto &kc = cfg.knobs[knob];
+            std::string target;
+            if (!kc.targets.empty()) {
+                target = kc.targets.front();
+            } else if (kc.type == "focused") {
+                int pid = focusMonitor.getPID();
+                if (pid > 0) {
+                    char p[64];
+                    snprintf(p, sizeof(p), "/proc/%d/comm", pid);
+                    FILE *f = fopen(p, "r");
+                    if (f) {
+                        char buf[256];
+                        if (fgets(buf, sizeof(buf), f)) {
+                            target = buf;
+                            while (!target.empty() &&
+                                   (target.back() == '\n' || target.back() == '\r'))
+                                target.pop_back();
+                        }
+                        fclose(f);
+                    }
+                }
+            }
+            overlay.showVolume(vol, kc.type, target);
+        }
     });
 
     // --- Button callback (HID read thread) ---

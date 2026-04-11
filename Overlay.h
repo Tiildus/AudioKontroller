@@ -8,15 +8,19 @@
 
 #pragma once
 #include <QString>
+#include <string>
 
 class Overlay {
 public:
     Overlay() = default;
 
-    // Displays the volume level (0.0–1.0) as a percentage in the KDE OSD.
-    void showVolume(float volume);
+    // Displays the volume level (0.0–1.0) as a progress bar in the KDE OSD.
+    // |type|  — knob type ("app", "focused", "system")
+    // |target| — first app binary name (used as icon for "app" knobs)
+    void showVolume(float volume, const std::string &type = {},
+                    const std::string &target = {});
 
 private:
-    // Sends a D-Bus message to KDE Plasma's OSD service.
-    void showKDEOSD(const QString &title, const QString &text);
+    // Sends a D-Bus showProgress call to KDE Plasma's OSD service.
+    void showKDEOSD(const QString &icon, int percent, const QString &text);
 };
