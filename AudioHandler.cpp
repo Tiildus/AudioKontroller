@@ -11,9 +11,9 @@
 
 #include "AudioHandler.h"
 #include "Logger.h"
+#include "Util.h"
 #include <algorithm>
 #include <cctype>
-#include <cstdio>    // fopen, fgets, fclose
 
 // Case-insensitive substring check: returns true if haystack contains needle
 // (ignoring capitalization). For example, "Discord" contains "discord".
@@ -24,30 +24,6 @@ static bool containsIgnoreCase(const std::string& haystack, const std::string& n
                           [](char a, char b) { return std::tolower(static_cast<unsigned char>(a))
                                                    == std::tolower(static_cast<unsigned char>(b)); });
     return it != haystack.end();
-}
-
-// Reads /proc/<pid>/comm to get the process's binary name (e.g. "discord",
-// "firefox"). Returns an empty string on failure. Used by the "focused" knob
-// type to resolve a window PID to a name, so we can match by name instead of
-// PID — this handles Electron apps where the window and audio processes have
-// different PIDs but share the same binary name.
-static std::string getProcessName(uint32_t pid) {
-    char path[64];
-    snprintf(path, sizeof(path), "/proc/%u/comm", pid);
-
-    FILE* f = fopen(path, "r");
-    if (!f) return {};  // process exited or no permission
-
-    char buf[256];
-    if (!fgets(buf, sizeof(buf), f)) { fclose(f); return {}; }
-    fclose(f);
-
-    // fgets includes the trailing newline — strip it.
-    std::string name(buf);
-    while (!name.empty() && (name.back() == '\n' || name.back() == '\r'))
-        name.pop_back();
-
-    return name;
 }
 
 bool AudioHandler::init() {
@@ -85,20 +61,21 @@ bool AudioHandler::init() {
     // pa_threaded_mainloop_wait atomically releases the lock and sleeps until
     // pa_threaded_mainloop_signal wakes us (from contextStateCallback).
     // The while loop guards against spurious wakeups.
-    pa_threaded_mainloop_lock(mainloop.get());
-    while (true) {
-        pa_context_state_t state = pa_context_get_state(context);
-        if (state == PA_CONTEXT_READY) {
-            connected = true;
-            break;
+    {
+        PaLockGuard lock(mainloop.get());
+        while (true) {
+            pa_context_state_t state = pa_context_get_state(context);
+            if (state == PA_CONTEXT_READY) {
+                connected = true;
+                break;
+            }
+            if (!PA_CONTEXT_IS_GOOD(state)) {
+                Logger::instance().error("Audio", "PulseAudio connection failed");
+                break;
+            }
+            pa_threaded_mainloop_wait(mainloop.get()); // releases lock, sleeps, re-acquires
         }
-        if (!PA_CONTEXT_IS_GOOD(state)) {
-            Logger::instance().error("Audio", "PulseAudio connection failed");
-            break;
-        }
-        pa_threaded_mainloop_wait(mainloop.get()); // releases lock, sleeps, re-acquires
     }
-    pa_threaded_mainloop_unlock(mainloop.get());
 
     if (connected) {
         Logger::instance().info("Audio", "Connected to PulseAudio");
@@ -198,7 +175,7 @@ void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
                 // (Discord, VS Code, etc.) where the window-owning process and
                 // the audio-playing process are different PIDs but share the
                 // same binary name in PulseAudio.
-                std::string name = getProcessName(static_cast<uint32_t>(pid));
+                std::string name = getProcessName(pid);
                 if (!name.empty())
                     setVolumeForApps({name}, volume);
             }
@@ -211,23 +188,21 @@ void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
 // Locks the mainloop so it's safe to call from the HID thread.
 void AudioHandler::setVolumeForApps(const std::vector<std::string>& appNames, float volume) {
     if (!connected) return;
-    pa_threaded_mainloop_lock(mainloop.get());
+    PaLockGuard lock(mainloop.get());
     targetApps = appNames;
     isSystem = false;
     targetVolume = volume;
     requestSinkInputs(); // enumerate streams; callback applies the volume
-    pa_threaded_mainloop_unlock(mainloop.get());
 }
 
 // Locks the mainloop so it's safe to call from the HID thread.
 void AudioHandler::setSystemVolume(float volume) {
     if (!connected) return;
-    pa_threaded_mainloop_lock(mainloop.get());
+    PaLockGuard lock(mainloop.get());
     isSystem = true;
     targetApps.clear();
     targetVolume = volume;
     requestSinkInfo();
-    pa_threaded_mainloop_unlock(mainloop.get());
 }
 
 // Must be called with the mainloop lock held.

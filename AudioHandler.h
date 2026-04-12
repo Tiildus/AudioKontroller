@@ -60,6 +60,15 @@ private:
         void operator()(pa_threaded_mainloop* ml) const { pa_threaded_mainloop_free(ml); }
     };
     std::unique_ptr<pa_threaded_mainloop, PaMainloopDeleter> mainloop;
+
+    // RAII wrapper for pa_threaded_mainloop_lock/unlock.
+    struct PaLockGuard {
+        pa_threaded_mainloop* ml;
+        PaLockGuard(pa_threaded_mainloop* ml) : ml(ml) { pa_threaded_mainloop_lock(ml); }
+        ~PaLockGuard() { pa_threaded_mainloop_unlock(ml); }
+        PaLockGuard(const PaLockGuard&) = delete;
+        PaLockGuard& operator=(const PaLockGuard&) = delete;
+    };
     pa_context* context = nullptr;
     bool connected = false;
 

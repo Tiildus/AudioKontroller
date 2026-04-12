@@ -31,6 +31,7 @@ add_executable(audiokontroller
     ButtonHandler.cpp ButtonHandler.h
     ConfigManager.cpp ConfigManager.h
     Logger.cpp Logger.h
+    Util.h
 )
 
 target_compile_options(audiokontroller PRIVATE

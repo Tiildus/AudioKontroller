@@ -5,9 +5,11 @@ APP_NAME="AudioKontroller"
 BIN_NAME="audiokontroller"
 REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$REPO_DIR/build"
-INSTALL_DIR="$HOME/.local/bin/audiokontroller"
-INSTALL_BIN="$INSTALL_DIR/$BIN_NAME"
-INSTALL_CONFIG="$INSTALL_DIR/config.json"
+
+# XDG Base Directory paths
+BIN_DIR="$HOME/.local/bin"
+CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/audiokontroller"
+STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/audiokontroller"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/audiokontroller.service"
 
@@ -89,25 +91,18 @@ cmake --build "$BUILD_DIR" -j"$(nproc)"
 
 # --- Install binary ---
 # Stop first so the binary file isn't open when we overwrite it.
-echo "Installing to $INSTALL_DIR/"
-mkdir -p "$INSTALL_DIR"
+echo "Installing..."
+mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$STATE_DIR"
 systemctl --user stop audiokontroller.service 2>/dev/null || true
 
-cp "$BUILD_DIR/$BIN_NAME" "$INSTALL_BIN"
-chmod +x "$INSTALL_BIN"
+cp "$BUILD_DIR/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
+chmod +x "$BIN_DIR/$BIN_NAME"
 
 # Config is the only file we guard — the user edits this, so never overwrite it.
-if [ ! -f "$INSTALL_CONFIG" ]; then
-    cp "$REPO_DIR/config.json" "$INSTALL_CONFIG"
-    echo "Config copied to $INSTALL_CONFIG"
+if [ ! -f "$CONFIG_DIR/config.json" ]; then
+    cp "$REPO_DIR/config.json" "$CONFIG_DIR/config.json"
+    echo "Config created at $CONFIG_DIR/config.json"
 fi
-
-# --- CLI symlink ---
-# The binary handles subcommands directly (start, stop, config, etc.).
-# The symlink gives it the user-facing name "AudioKontroller".
-# /proc/self/exe resolves through symlinks, so resolveInstallDir() still
-# returns the correct directory.
-ln -sf "$INSTALL_BIN" "$HOME/.local/bin/AudioKontroller"
 
 # --- systemd service ---
 # Overwriting and reloading is idempotent.
@@ -119,13 +114,12 @@ After=graphical-session.target ydotool.service ydotoold.service
 
 [Service]
 Type=simple
-WorkingDirectory=$INSTALL_DIR
-ExecStart=$INSTALL_BIN
+ExecStart=$BIN_DIR/$BIN_NAME
 Restart=on-failure
 RestartSec=3
 NoNewPrivileges=yes
 ProtectSystem=strict
-ReadWritePaths=$INSTALL_DIR
+ReadWritePaths=$STATE_DIR
 
 [Install]
 WantedBy=default.target
@@ -137,12 +131,12 @@ systemctl --user enable --now audiokontroller.service || true
 echo
 echo "Done! $APP_NAME is running."
 echo
-echo "  Install directory : $INSTALL_DIR/"
-echo "  Config            : $INSTALL_CONFIG"
-echo "  Log               : $INSTALL_DIR/audiokontroller.log"
+echo "  Binary  : $BIN_DIR/$BIN_NAME"
+echo "  Config  : $CONFIG_DIR/config.json"
+echo "  Log     : $STATE_DIR/audiokontroller.log"
 echo
 echo "Commands:"
-echo "  AudioKontroller start|stop|restart|status|config|log"
+echo "  audiokontroller start|stop|restart|status|config|log"
 echo
 # Only show the logout warning if the user isn't in the uinput group yet
 if ! id -nG "$USER" | grep -qw uinput; then

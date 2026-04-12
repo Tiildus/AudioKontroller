@@ -4,7 +4,9 @@
 
 #include "ConfigManager.h"
 #include "Logger.h"
+#include <QDir>
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonArray>
 #include <iostream>
@@ -43,7 +45,7 @@ bool ConfigManager::load(const std::string& path) {
     // Read top-level fields with sensible defaults if any key is missing.
     config.device       = root.value("device").toString("Mini").toStdString();
     config.knobThreshold = root.value("knobThreshold").toInt(4);
-    config.logFile      = root.value("logFile").toString("audiokontroller.log").toStdString();
+    config.logFile      = root.value("logFile").toString("").toStdString();
 
     QJsonArray knobsArr = root.value("knobs").toArray();
     config.knobs.clear();
@@ -61,11 +63,12 @@ bool ConfigManager::load(const std::string& path) {
 }
 
 // Generates a default config as a starting point for new installs.
+// Creates parent directories if they don't exist (e.g. ~/.config/audiokontroller/).
 bool ConfigManager::createDefault(const std::string& path) {
+    QDir().mkpath(QFileInfo(QString::fromStdString(path)).absolutePath());
     QJsonObject root;
     root["device"]         = "Mini";
     root["knobThreshold"]  = 4;
-    root["logFile"]        = "audiokontroller.log";
 
     QJsonArray knobs;
     auto makeKnob = [](const QString& type, const QString& target = "") {

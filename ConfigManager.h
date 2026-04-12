@@ -5,7 +5,7 @@
 //   - Which PCPanel device model to use (Mini / Pro / RGB)
 //   - What each knob controls (named app or "focused" window)
 //   - What each button does (media, key sequence, force close, none)
-//   - Dead zone threshold and log file path
+//   - Dead zone threshold and optional log file path override
 //
 // If the config file doesn't exist on first run, a sensible default is
 // generated automatically so the daemon works out of the box.
@@ -47,7 +47,7 @@ struct ButtonConfig {
 struct Config {
     std::string device        = "Mini"; // PCPanel model name
     int knobThreshold         = 4;      // minimum raw movement (0–255) to fire a callback
-    std::string logFile       = "audiokontroller.log";
+    std::string logFile;  // empty = XDG default (~/.local/state/audiokontroller/)
     std::vector<KnobConfig>   knobs;
     std::vector<ButtonConfig> buttons;
 };

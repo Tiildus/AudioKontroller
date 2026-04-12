@@ -4,12 +4,12 @@
 
 #include "ButtonHandler.h"
 #include "Logger.h"
+#include "Util.h"
 #include <unistd.h>   // fork, execvp, _exit
 #include <signal.h>   // kill, SIGTERM
 #include <sstream>
 #include <algorithm>
 #include <cctype>
-#include <fstream>
 #include <unordered_set>
 
 // Processes that should never be force-closed on KDE Wayland / Fedora.
@@ -215,15 +215,6 @@ void ButtonHandler::sendKeyCombo(const std::string& combo) {
     Logger::instance().info("ButtonHandler", "Dispatched combo: " + combo);
 }
 
-// Reads /proc/<pid>/comm to get the process name (no trailing newline).
-// Returns an empty string if the file can't be read (e.g. process already gone).
-static std::string procName(int pid) {
-    std::ifstream f("/proc/" + std::to_string(pid) + "/comm");
-    std::string name;
-    std::getline(f, name);
-    return name;
-}
-
 // Terminates the focused window's process:
 //   1. Checks /proc/<pid>/comm against closeBlocklist — aborts if matched.
 //   2. SIGTERM — politely asks the process to exit (it can save state, etc.)
@@ -238,7 +229,7 @@ void ButtonHandler::forceCloseFocusedWindow() {
         return;
     }
 
-    std::string name = procName(pid);
+    std::string name = getProcessName(pid);
     if (closeBlocklist.count(name)) {
         Logger::instance().warn("ButtonHandler",
             "Blocked force-close of protected process: " + name +
@@ -248,7 +239,7 @@ void ButtonHandler::forceCloseFocusedWindow() {
 
     // Re-check that the PID still belongs to the same process (guards against
     // PID reuse between the blocklist check above and the kill below).
-    if (procName(pid) != name) {
+    if (getProcessName(pid) != name) {
         Logger::instance().warn("ButtonHandler",
             "PID " + std::to_string(pid) + " was reused, aborting kill");
         return;

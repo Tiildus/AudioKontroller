@@ -34,7 +34,7 @@ AudioKontroller is a Linux daemon that turns a PCPanel USB hardware controller i
 - Runs as a systemd user service (not as root)
 - Targets Linux with KDE Plasma on Wayland
 - Uses PulseAudio for audio control, D-Bus for desktop integration
-- The compiled binary is named `audiokontrollerd` (the trailing "d" is a Unix convention for daemons)
+- The compiled binary is named `audiokontroller`
 
 ---
 
@@ -178,10 +178,10 @@ Three structs represent the parsed configuration:
 
 1. Tries to open the JSON file. If it doesn't exist (first run), it calls `createDefault()` to generate a sensible starter config, then opens the newly created file.
 2. Parses the JSON using Qt's `QJsonDocument`. If parsing fails, it prints an error to stderr and returns `false`.
-3. Reads top-level fields (`device`, `knobThreshold`, `logFile`) with fallback defaults if any are missing.
+3. Reads top-level fields (`device`, `knobThreshold`, and optionally `logFile`) with fallback defaults if any are missing.
 4. Iterates through the `"knobs"` and `"buttons"` JSON arrays, passing each object to `parseKnob()` or `parseButton()`.
 
-**Why stderr instead of the Logger?** The log file path is itself defined in the config. If the config can't be loaded, the Logger hasn't been initialized yet, so there's nowhere else to write the error.
+**Why stderr instead of the Logger?** The Logger hasn't been initialized at config-load time (it depends on a successful config load), so there's nowhere else to write the error.
 
 ### Default Config Generation
 
@@ -316,15 +316,18 @@ Because both sides use `lock()`/`unlock()`, the shared fields (`targetApps`, `ta
 `init()` creates a mainloop and a context (which represents the connection to the PulseAudio server), then starts the mainloop thread. It then enters a wait loop:
 
 ```cpp
-pa_threaded_mainloop_lock(mainloop.get());
-while (true) {
-    pa_context_state_t state = pa_context_get_state(context);
-    if (state == PA_CONTEXT_READY) { connected = true; break; }
-    if (!PA_CONTEXT_IS_GOOD(state)) { break; }
-    pa_threaded_mainloop_wait(mainloop.get());
+{
+    PaLockGuard lock(mainloop.get());
+    while (true) {
+        pa_context_state_t state = pa_context_get_state(context);
+        if (state == PA_CONTEXT_READY) { connected = true; break; }
+        if (!PA_CONTEXT_IS_GOOD(state)) { break; }
+        pa_threaded_mainloop_wait(mainloop.get());
+    }
 }
-pa_threaded_mainloop_unlock(mainloop.get());
 ```
+
+`PaLockGuard` is a small RAII wrapper defined in `AudioHandler.h` that calls `pa_threaded_mainloop_lock()` in its constructor and `pa_threaded_mainloop_unlock()` in its destructor. This guarantees the lock is released even on early returns or exceptions.
 
 `pa_threaded_mainloop_wait()` atomically releases the lock and puts the thread to sleep. When the connection state changes, PulseAudio calls `contextStateCallback()`, which calls `pa_threaded_mainloop_signal()` to wake us up. We re-check the state, and loop until it's either `READY` or a failure state. The `while` loop guards against spurious wakeups — a standard pattern when working with condition variables.
 
@@ -484,14 +487,12 @@ For advanced users, the `"args"` field in config allows passing raw ydotool argu
 
 ### Force Close
 
-`forceCloseFocusedWindow()` implements a two-stage termination:
+`forceCloseFocusedWindow()` sends `SIGTERM` to the focused window's PID — a polite request for the process to exit (it can save state, flush buffers, etc.). There is no escalation to `SIGKILL`; if the process ignores `SIGTERM`, the user can press the button again or close it manually.
 
-1. Send `SIGTERM` to the focused window's PID (polite request to exit — the app can save state)
-2. Wait 1 second
-3. Check if the process is still alive using `kill(pid, 0)` (signal 0 is a no-op that just checks existence)
-4. If still alive, send `SIGKILL` (forcible, immediate termination — cannot be caught or ignored)
+Before sending the signal, two safety checks run:
 
-The 1-second wait runs in a **detached thread** so it doesn't block the HID read loop. A detached thread cleans itself up when it finishes — no `join()` needed.
+1. **Blocklist check:** The process name (from `/proc/<pid>/comm`) is compared against a hardcoded set of protected system processes (KDE, Wayland, PulseAudio, systemd, etc.). If matched, the kill is aborted and a warning is logged.
+2. **TOCTOU re-check:** The process name is read a second time just before the `kill()` call. If the PID was recycled between the blocklist check and the kill, the names won't match and the kill is aborted. This guards against a race where PID reuse could cause `SIGTERM` to hit an unrelated process.
 
 ---
 
@@ -510,24 +511,37 @@ QDBusMessage msg = QDBusMessage::createMethodCall(
     "org.kde.plasmashell",        // service
     "/org/kde/osdService",        // object path
     "org.kde.osdService",         // interface
-    "showText"                    // method
+    "mediaPlayerVolumeChanged"    // method
 );
-msg << "audio-volume-high" << title + ": " + text;
+msg << percent << text << icon;
 QDBusConnection::sessionBus().call(msg, QDBus::NoBlock);
 ```
 
-The `showText` method takes an icon name (from the system icon theme) and a text string. `QDBus::NoBlock` sends the call without waiting for a response — we don't need confirmation that the OSD was shown.
+`mediaPlayerVolumeChanged` is the only method on this interface that shows a progress bar with a custom icon. It takes three arguments: the current percent (0–100), a label string, and a freedesktop icon name. `QDBus::NoBlock` sends the call without waiting for a response — we don't need confirmation that the OSD was shown.
+
+### App Icon Resolution
+
+When `showVolume()` is called with a process name (e.g. `"discord"`), `resolveAppIcon()` searches XDG application directories (including Flatpak export paths) for a `.desktop` file matching that process name, then extracts its `Icon=` value. This means the OSD popup shows the app's actual icon instead of a generic volume icon. Results are cached so repeated knob turns don't hit the filesystem. If no desktop file is found, the process name itself is used as the icon name — which works for native apps whose binary name matches their icon name.
 
 ### When the OSD Is Suppressed
 
 In `main.cpp`, the overlay is deliberately *not* shown for system volume changes:
 
 ```cpp
-if (cfg.knobs[knob].type != "system")
-    overlay.showVolume(vol);
+if (cfg.knobs[knob].type != "system") {
+    // Resolve a process name for the icon (from config targets or focused window)
+    std::string target;
+    if (!kc.targets.empty())
+        target = kc.targets.front();
+    else if (kc.type == "focused") {
+        int pid = focusMonitor.getPID();
+        if (pid > 0) target = getProcessName(pid);
+    }
+    overlay.showVolume(vol, target);
+}
 ```
 
-This is because changing the system volume through PulseAudio already triggers KDE's own volume OSD. Showing our overlay too would cause two popups to appear simultaneously.
+This is because changing the system volume through PulseAudio already triggers KDE's own volume OSD. Showing our overlay too would cause two popups to appear simultaneously. The `target` string is passed to `showVolume()` so the OSD can display the correct app icon.
 
 ---
 
@@ -566,36 +580,27 @@ If config loading fails, the daemon exits immediately. There's nothing useful it
 ### 4. Initialize Logger
 
 ```cpp
-Logger::instance().init(expandHome(cfg.logFile));
+std::string logPath = cfg.logFile.empty() ? resolveLogPath() : cfg.logFile;
+Logger::instance().init(logPath);
 ```
 
-The `expandHome()` helper handles the `~/` prefix, which PulseAudio and other Linux tools use but the C runtime doesn't expand automatically.
+If the config specifies a custom `logFile` path, that's used directly. Otherwise `resolveLogPath()` returns the XDG state directory default (`~/.local/state/audiokontroller/audiokontroller.log`).
 
-### 5. Determine the Install Directory
-
-```cpp
-std::unique_ptr<char, decltype(&free)> exePath(realpath("/proc/self/exe", nullptr), &free);
-```
-
-`/proc/self/exe` is a Linux-specific symlink that always points to the running binary. By resolving it and stripping the filename, we get the directory the binary lives in. FocusMonitor needs this to know where to write its KWin script file.
-
-The `unique_ptr` with `free` as the deleter is a pattern for C-allocated memory (`realpath` uses `malloc` internally). It ensures the memory is freed even if an exception occurs.
-
-### 6. Construct Components
+### 5. Construct Components
 
 ```cpp
 Overlay overlay;
 AudioHandler audio;
 audio.init();
 ButtonHandler button;
-FocusMonitor focusMonitor(installDir);
+FocusMonitor focusMonitor;
 ```
 
 Order matters for two reasons:
 - `FocusMonitor` is constructed after `AudioHandler` and `ButtonHandler` because it starts D-Bus services in its constructor.
 - Destruction happens in reverse order (LIFO). The `PCPanelHandler` (constructed next) must be stopped before `AudioHandler` is destroyed, because the HID thread's callback calls into AudioHandler.
 
-### 7. Inject Dependencies
+### 6. Inject Dependencies
 
 ```cpp
 button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
@@ -604,7 +609,7 @@ audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
 
 These lambdas capture a reference to `focusMonitor`. When ButtonHandler or AudioHandler calls `getPID()`, the lambda calls through to `focusMonitor.getPID()`. This is how the PID dependency is injected without creating a compile-time dependency between the classes.
 
-### 8. Register Signal Handlers
+### 7. Register Signal Handlers
 
 ```cpp
 globalPanel = &panel;
@@ -619,25 +624,35 @@ The signal handler calls `panel.requestStop()` (writes an atomic bool) and `QCor
 
 `globalPanel` is a raw global pointer because signal handlers can't capture lambdas or access member variables — they can only use global state.
 
-### 9. Register Callbacks
+### 8. Register Callbacks
 
 ```cpp
 panel.setCallback([&](int knob, float vol) {
+    if (knob < 0 || knob >= static_cast<int>(cfg.knobs.size())) return;
     audio.handleKnob(cfg.knobs[knob], vol);
-    if (cfg.knobs[knob].type != "system")
-        overlay.showVolume(vol);
+    if (cfg.knobs[knob].type != "system") {
+        // Resolve a target process name for the OSD icon
+        std::string target;
+        if (!kc.targets.empty()) target = kc.targets.front();
+        else if (kc.type == "focused") {
+            int pid = focusMonitor.getPID();
+            if (pid > 0) target = getProcessName(pid);
+        }
+        overlay.showVolume(vol, target);
+    }
 });
 
 panel.setButtonCallback([&](int btn) {
-    button.handleButton(cfg.buttons[btn]);
+    if (btn >= 0 && btn < static_cast<int>(cfg.buttons.size()))
+        button.handleButton(cfg.buttons[btn]);
 });
 ```
 
-These are the core connections. When the HID thread detects a knob movement, it calls the knob callback, which dispatches to AudioHandler and Overlay. When it detects a button press, it calls the button callback, which dispatches to ButtonHandler.
+These are the core connections. When the HID thread detects a knob movement, it calls the knob callback, which dispatches to AudioHandler and Overlay (with the focused app's icon). When it detects a button press, it calls the button callback, which dispatches to ButtonHandler.
 
-Both callbacks include bounds checking (`knob < cfg.knobs.size()`) to handle cases where the device has more controls than the config defines.
+Both callbacks include bounds checking to handle cases where the device has more controls than the config defines.
 
-### 10. Start and Run
+### 9. Start and Run
 
 ```cpp
 panel.startListeningAsync();  // launches HID read thread
@@ -672,10 +687,6 @@ The daemon uses three threads. Understanding which code runs on which thread is 
 - Created by `pa_threaded_mainloop_start()` inside `AudioHandler::init()`
 - Runs PulseAudio's event loop; fires PA callbacks (`sinkInputInfoCallback`, `sinkInfoCallback`)
 - **Rule:** Never call PA functions without holding the mainloop lock (except from inside PA callbacks, which already hold it).
-
-### Detached Threads
-
-`ButtonHandler::forceCloseFocusedWindow()` creates a short-lived detached thread for each force-close action (to avoid blocking the HID thread during the 1-second wait between SIGTERM and SIGKILL). These are truly fire-and-forget.
 
 ### Synchronization Mechanisms
 

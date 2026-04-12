@@ -15,25 +15,14 @@
 #include "ButtonHandler.h"
 #include "ConfigManager.h"
 #include "Logger.h"
+#include "Util.h"
 #include <QCoreApplication>
 #include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
-#include <memory>
 #include <unistd.h>
-
-// Expands a leading "~/" to the user's home directory.
-// PulseAudio and other tools use this convention; the C runtime does not
-// expand it automatically.
-static std::string expandHome(const std::string& path) {
-    if (path.size() >= 2 && path[0] == '~' && path[1] == '/') {
-        const char* home = std::getenv("HOME");
-        if (home) return std::string(home) + path.substr(1);
-    }
-    return path;
-}
 
 static PCPanelDevice deviceFromString(const std::string& name) {
     if (name == "Pro") return PCPanelDevice::Pro;
@@ -41,16 +30,22 @@ static PCPanelDevice deviceFromString(const std::string& name) {
     return PCPanelDevice::Mini;
 }
 
-// Resolves the directory the binary lives in via /proc/self/exe.
-// Used by the config and log subcommands to find files in the install.sh layout.
-static std::string resolveInstallDir() {
-    std::unique_ptr<char, decltype(&free)> exePath(realpath("/proc/self/exe", nullptr), &free);
-    if (exePath) {
-        std::string exeStr(exePath.get());
-        auto lastSlash = exeStr.rfind('/');
-        if (lastSlash != std::string::npos) return exeStr.substr(0, lastSlash);
-    }
-    return ".";
+// --- XDG Base Directory helpers ---
+// These follow the XDG Base Directory spec for standard Linux file placement:
+//   Config → $XDG_CONFIG_HOME (~/.config)
+//   State  → $XDG_STATE_HOME  (~/.local/state)
+static std::string xdgConfigDir() {
+    const char* xdg = std::getenv("XDG_CONFIG_HOME");
+    if (xdg) return std::string(xdg) + "/audiokontroller";
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.config/audiokontroller";
+}
+
+static std::string xdgStateDir() {
+    const char* xdg = std::getenv("XDG_STATE_HOME");
+    if (xdg) return std::string(xdg) + "/audiokontroller";
+    const char* home = std::getenv("HOME");
+    return std::string(home ? home : ".") + "/.local/state/audiokontroller";
 }
 
 // --- CLI subcommands ---
@@ -59,18 +54,17 @@ static std::string resolveInstallDir() {
 // Unrecognized arguments fall through to daemon mode.
 static constexpr const char* SERVICE_NAME = "audiokontroller.service";
 
-// Config and log files live next to the binary (install.sh layout).
 static std::string resolveConfigPath() {
-    return resolveInstallDir() + "/config.json";
+    return xdgConfigDir() + "/config.json";
 }
 
 static std::string resolveLogPath() {
-    return resolveInstallDir() + "/audiokontroller.log";
+    return xdgStateDir() + "/audiokontroller.log";
 }
 
 static void printUsage() {
-    std::cerr << "Usage: AudioKontroller {start|stop|restart|status|config|log}\n"
-              << "       AudioKontroller [config-path]   (run as daemon)\n";
+    std::cerr << "Usage: audiokontroller {start|stop|restart|status|config|log}\n"
+              << "       audiokontroller [config-path]   (run as daemon)\n";
 }
 
 static void handleSubcommand(int argc, char* argv[]) {
@@ -78,13 +72,8 @@ static void handleSubcommand(int argc, char* argv[]) {
 
     std::string cmd = argv[1];
 
-    if (cmd == "start" || cmd == "stop" || cmd == "restart") {
+    if (cmd == "start" || cmd == "stop" || cmd == "restart" || cmd == "status") {
         execlp("systemctl", "systemctl", "--user", cmd.c_str(), SERVICE_NAME, nullptr);
-        perror("execlp systemctl");
-        _exit(1);
-    }
-    if (cmd == "status") {
-        execlp("systemctl", "systemctl", "--user", "status", SERVICE_NAME, nullptr);
         perror("execlp systemctl");
         _exit(1);
     }
@@ -138,21 +127,21 @@ int main(int argc, char *argv[]) {
     sigaction(SIGCHLD, &sa_chld, nullptr);
 
     // Accept an optional config path as the first argument,
-    // falling back to "config.json" in the working directory.
-    std::string configPath = "config.json";
+    // falling back to the XDG config directory.
+    std::string configPath = resolveConfigPath();
     if (argc > 1) configPath = argv[1];
 
     ConfigManager configMgr;
     if (!configMgr.load(configPath)) {
-        // Config failure is the one error that goes to stderr, because the
-        // log file path itself comes from the config — it hasn't been
-        // initialized yet.
+        // Config failure goes to stderr because the logger hasn't been
+        // initialized yet (it depends on a successful config load).
         std::cerr << "Failed to load config, exiting.\n";
         return 1;
     }
     const Config& cfg = configMgr.get();
 
-    Logger::instance().init(expandHome(cfg.logFile));
+    std::string logPath = cfg.logFile.empty() ? resolveLogPath() : cfg.logFile;
+    Logger::instance().init(logPath);
     Logger::instance().info("Main", "Config loaded from " + configPath);
 
     // Construct all subsystems. The order matters for destruction (LIFO):
@@ -206,23 +195,10 @@ int main(int argc, char *argv[]) {
                 target = kc.targets.front();
             } else if (kc.type == "focused") {
                 int pid = focusMonitor.getPID();
-                if (pid > 0) {
-                    char p[64];
-                    snprintf(p, sizeof(p), "/proc/%d/comm", pid);
-                    FILE *f = fopen(p, "r");
-                    if (f) {
-                        char buf[256];
-                        if (fgets(buf, sizeof(buf), f)) {
-                            target = buf;
-                            while (!target.empty() &&
-                                   (target.back() == '\n' || target.back() == '\r'))
-                                target.pop_back();
-                        }
-                        fclose(f);
-                    }
-                }
+                if (pid > 0)
+                    target = getProcessName(pid);
             }
-            overlay.showVolume(vol, kc.type, target);
+            overlay.showVolume(vol, target);
         }
     });
 

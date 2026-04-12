@@ -82,8 +82,7 @@ static QString resolveAppIcon(const QString &processName) {
     return processName;
 }
 
-void Overlay::showVolume(float volume, const std::string & /*type*/,
-                         const std::string &target) {
+void Overlay::showVolume(float volume, const std::string &target) {
     int percent = static_cast<int>(volume * 100.0f + 0.5f);
 
     // If we have a process name, resolve it to a freedesktop icon name via the

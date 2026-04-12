@@ -1,7 +1,6 @@
 {
     "device": "Mini",
     "knobThreshold": 4,
-    "logFile": "audiokontroller.log",
     "knobs": [
         { "type": "app", "target": "firefox" },
         { "type": "app", "target": "discord" },
