@@ -727,7 +727,8 @@ To tie everything together, here's the complete journey of a knob event through 
 5. Knob callback lambda (registered in main.cpp) [HID thread]
    - Looks up cfg.knobs[2] -> KnobConfig { type: "focused" }
    - Calls audio.handleKnob(knobConfig, 0.702)
-   - Calls overlay.showVolume(0.702)
+   - Resolves focused process name for the OSD icon
+   - Calls overlay.showVolume(0.702, "discord")
 
 6. AudioHandler::handleKnob() [HID thread]
    - type == "focused", so call getPID()
@@ -749,9 +750,10 @@ To tie everything together, here's the complete journey of a knob event through 
    - "discord" contains "discord" (case-insensitive) -> match!
    - Sets stream volume to 0.702 * PA_VOLUME_NORM = 46006
 
-10. Overlay::showVolume(0.702) [HID thread]
-    - Sends D-Bus call to KDE Plasma OSD
-    - Shows "Volume: 70%" popup on screen
+10. Overlay::showVolume(0.702, "discord") [HID thread]
+    - resolveAppIcon("discord") finds com.discordapp.Discord.desktop → Icon=com.discordapp.Discord
+    - Sends D-Bus mediaPlayerVolumeChanged call to KDE Plasma OSD
+    - Shows "Volume: 70%" popup with Discord's icon on screen
 
 11. USER hears Discord's audio at 70% volume
 ```
@@ -788,7 +790,11 @@ The user is added to the `uinput` group. A logout/login is required for group me
 
 ### Build and Install
 
-The binary is built with CMake and installed to `~/.local/bin/AudioKontroller.d/audiokontrollerd`. The config file is copied to the same directory on first install only (to avoid overwriting user edits).
+The binary is built with CMake and installed to `~/.local/bin/audiokontroller` following the XDG Base Directory specification:
+
+- **Binary:** `~/.local/bin/audiokontroller`
+- **Config:** `~/.config/audiokontroller/config.json` (only copied on first install, to avoid overwriting user edits)
+- **Logs/state:** `~/.local/state/audiokontroller/`
 
 ### systemd Service
 
@@ -798,14 +804,15 @@ A user-level systemd service is created at `~/.config/systemd/user/audiokontroll
 - `Restart=on-failure` — automatically restarts if the daemon crashes
 - `NoNewPrivileges=yes` — prevents privilege escalation
 - `ProtectSystem=strict` — makes the entire filesystem read-only except explicitly allowed paths
-- `ReadWritePaths=` — allows writing only to the install directory (for logs and config)
+- `ReadWritePaths=` — allows writing only to the state directory (for logs)
 
-### CLI Wrapper
+### CLI Commands
 
-A convenience script at `~/.local/bin/AudioKontroller` provides commands:
-- `AudioKontroller start|stop|restart|status` — control the service
-- `AudioKontroller config` — open config.json in your editor
-- `AudioKontroller log` — view the log file
+The `audiokontroller` binary doubles as both daemon and CLI. When invoked with a subcommand, it `exec`s into the appropriate tool and never returns. Without a subcommand, it runs as the daemon.
+
+- `audiokontroller start|stop|restart|status` — control the systemd service
+- `audiokontroller config` — open config.json in `$EDITOR` (defaults to nano)
+- `audiokontroller log` — view the log file with `less`
 
 ---
 
@@ -822,7 +829,7 @@ A convenience script at `~/.local/bin/AudioKontroller` provides commands:
 
 1. Add the new action string to `ButtonConfig::action` documentation in `ConfigManager.h`
 2. Add a new `else if` branch in `ButtonHandler::handleButton()`
-3. Implement the action method. If it runs an external program, use `forkExec()`. If it might block, run it in a detached thread
+3. Implement the action method. If it runs an external program, use `forkExec()`
 4. If it needs the focused window PID, use the injected `getPID()` function
 
 ### Adding a New Device Variant
@@ -834,7 +841,7 @@ A convenience script at `~/.local/bin/AudioKontroller` provides commands:
 
 ### Key Safety Rules
 
-- **Never block the HID thread** for more than a few milliseconds. Use detached threads for long operations.
+- **Never block the HID thread** for more than a few milliseconds. Use `forkExec()` for anything that could take time.
 - **Always lock the PA mainloop** before reading or writing `targetApps`, `targetVolume`, or `isSystem`.
 - **Use `forkExec()` for external commands**, never `std::system()`.
 - **Use `_exit()` in fork children**, never `exit()`.
@@ -844,14 +851,16 @@ A convenience script at `~/.local/bin/AudioKontroller` provides commands:
 
 | File | Lines | Role |
 |------|-------|------|
-| `main.cpp` | 160 | Entry point, wiring, lifecycle |
-| `ConfigManager.h/cpp` | 75 + 155 | JSON config parsing |
-| `Logger.h/cpp` | 50 + 75 | Thread-safe file logging |
+| `main.cpp` | 225 | Entry point, wiring, lifecycle |
+| `ConfigManager.h/cpp` | 75 + 157 | JSON config parsing |
+| `Logger.h/cpp` | 51 + 88 | Thread-safe file logging |
 | `PCPanelHandler.h/cpp` | 99 + 151 | USB HID device input |
-| `AudioHandler.h/cpp` | 92 + 253 | PulseAudio volume control |
-| `FocusMonitor.h/cpp` | 79 + 151 | KWin focus tracking via D-Bus |
-| `ButtonHandler.h/cpp` | 59 + 199 | Button action execution |
-| `Overlay.h/cpp` | 22 + 35 | KDE OSD volume display |
-| `config.json` | 17 | Runtime configuration |
+| `AudioHandler.h/cpp` | 101 + 234 | PulseAudio volume control |
+| `FocusMonitor.h/cpp` | 77 + 170 | KWin focus tracking via D-Bus |
+| `ButtonHandler.h/cpp` | 58 + 251 | Button action execution |
+| `Overlay.h/cpp` | 24 + 130 | KDE OSD volume display |
+| `Util.h` | 13 | Shared `/proc/<pid>/comm` helper |
+| `config.json` | 16 | Runtime configuration |
 | `CMakeLists.txt` | 48 | Build configuration |
-| `install.sh` | 162 | Installation and deployment |
+| `install.sh` | 144 | Installation and deployment |
+| `uninstall.sh` | 88 | Uninstallation |
