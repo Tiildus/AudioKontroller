@@ -7,6 +7,8 @@ REPO_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BUILD_DIR="$REPO_DIR/build"
 
 # XDG Base Directory paths
+# CONFIG_DIR is used in the output message only — the daemon creates config.json
+# automatically on first run via ConfigManager::createDefault().
 BIN_DIR="$HOME/.local/bin"
 CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/audiokontroller"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/audiokontroller"
@@ -92,17 +94,11 @@ cmake --build "$BUILD_DIR" -j"$(nproc)"
 # --- Install binary ---
 # Stop first so the binary file isn't open when we overwrite it.
 echo "Installing..."
-mkdir -p "$BIN_DIR" "$CONFIG_DIR" "$STATE_DIR"
+mkdir -p "$BIN_DIR" "$STATE_DIR"
 systemctl --user stop audiokontroller.service 2>/dev/null || true
 
 cp "$BUILD_DIR/$BIN_NAME" "$BIN_DIR/$BIN_NAME"
 chmod +x "$BIN_DIR/$BIN_NAME"
-
-# Config is the only file we guard — the user edits this, so never overwrite it.
-if [ ! -f "$CONFIG_DIR/config.json" ]; then
-    cp "$REPO_DIR/config.json" "$CONFIG_DIR/config.json"
-    echo "Config created at $CONFIG_DIR/config.json"
-fi
 
 # --- systemd service ---
 # Overwriting and reloading is idempotent.

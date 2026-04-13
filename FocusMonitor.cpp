@@ -4,13 +4,13 @@
 
 #include "FocusMonitor.h"
 #include "Logger.h"
+#include "Util.h"
 #include <QDBusMessage>
 #include <QDBusReply>
 #include <QDir>
 #include <QFile>
 #include <QTextStream>
 #include <sys/stat.h>
-#include <unistd.h>
 
 // KWin's D-Bus service and scripting interface constants.
 static const char* KWIN_SERVICE        = "org.kde.KWin";
@@ -23,15 +23,9 @@ static const char* SCRIPT_NAME = "audiokontroller-focus";
 FocusMonitor::FocusMonitor(QObject* parent)
     : QObject(parent)
 {
-    // Write the KWin script to a runtime directory rather than alongside the
-    // binary, so it works regardless of where the binary is installed.
-    std::string scriptDir;
-    const char* xdgRuntime = std::getenv("XDG_RUNTIME_DIR");
-    if (xdgRuntime) {
-        scriptDir = std::string(xdgRuntime) + "/audiokontroller";
-    } else {
-        scriptDir = "/tmp/audiokontroller-" + std::to_string(getuid());
-    }
+    // Write the KWin script to the XDG runtime directory so it works
+    // regardless of where the binary is installed.
+    std::string scriptDir = xdgRuntimeDir();
     QDir().mkpath(QString::fromStdString(scriptDir));
     chmod(scriptDir.c_str(), 0700);
     scriptPath = scriptDir + "/focus-monitor.js";

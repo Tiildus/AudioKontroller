@@ -17,50 +17,17 @@
 #include "Logger.h"
 #include "Util.h"
 #include <QCoreApplication>
-#include <algorithm>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
 #include <iostream>
 #include <unistd.h>
 
-static PCPanelDevice deviceFromString(const std::string& name) {
-    if (name == "Pro") return PCPanelDevice::Pro;
-    if (name == "RGB") return PCPanelDevice::RGB;
-    return PCPanelDevice::Mini;
-}
-
-// --- XDG Base Directory helpers ---
-// These follow the XDG Base Directory spec for standard Linux file placement:
-//   Config → $XDG_CONFIG_HOME (~/.config)
-//   State  → $XDG_STATE_HOME  (~/.local/state)
-static std::string xdgConfigDir() {
-    const char* xdg = std::getenv("XDG_CONFIG_HOME");
-    if (xdg) return std::string(xdg) + "/audiokontroller";
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.config/audiokontroller";
-}
-
-static std::string xdgStateDir() {
-    const char* xdg = std::getenv("XDG_STATE_HOME");
-    if (xdg) return std::string(xdg) + "/audiokontroller";
-    const char* home = std::getenv("HOME");
-    return std::string(home ? home : ".") + "/.local/state/audiokontroller";
-}
-
 // --- CLI subcommands ---
 // When invoked with a recognized subcommand, the binary execs into the
 // appropriate tool (systemctl, editor, less) and never returns.
 // Unrecognized arguments fall through to daemon mode.
 static constexpr const char* SERVICE_NAME = "audiokontroller.service";
-
-static std::string resolveConfigPath() {
-    return xdgConfigDir() + "/config.json";
-}
-
-static std::string resolveLogPath() {
-    return xdgStateDir() + "/audiokontroller.log";
-}
 
 static void printUsage() {
     std::cerr << "Usage: audiokontroller {start|stop|restart|status|config|log}\n"
@@ -158,9 +125,10 @@ int main(int argc, char *argv[]) {
     // can access the focused window's PID without depending on FocusMonitor directly.
     button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
     audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
+    audio.volumeGamma = cfg.volumeGamma;
 
-    PCPanelHandler panel(deviceFromString(cfg.device));
-    panel.knobThreshold = std::clamp(cfg.knobThreshold, 0, 50);
+    PCPanelHandler panel(cfg.device);
+    panel.knobThreshold = cfg.knobThreshold;
 
     // Register signal handlers after all objects are constructed so
     // globalPanel is valid before any signal could arrive.

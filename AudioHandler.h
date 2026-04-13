@@ -35,7 +35,14 @@ public:
     // Used by handleKnob() for "focused" knob type.
     void setGetPIDFunc(std::function<int()> func) { getPID = func; }
 
+    // Gamma curve exponent applied to app/focused volume before setting PA volume.
+    // System volume is unaffected (always linear).
+    // < 1.0 boosts low-end volume (more perceptually linear), 1.0 = linear.
+    // Set once at startup before HID thread starts, so no atomic needed.
+    float volumeGamma;
+
     // Dispatches a knob event based on the knob's config type.
+    // Applies the volumeGamma curve to "app" and "focused" types only.
     // Supported types: "app", "focused", "system"
     void handleKnob(const KnobConfig& kc, float volume);
 

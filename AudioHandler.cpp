@@ -12,19 +12,7 @@
 #include "AudioHandler.h"
 #include "Logger.h"
 #include "Util.h"
-#include <algorithm>
-#include <cctype>
-
-// Case-insensitive substring check: returns true if haystack contains needle
-// (ignoring capitalization). For example, "Discord" contains "discord".
-static bool containsIgnoreCase(const std::string& haystack, const std::string& needle) {
-    if (needle.empty() || needle.size() > haystack.size()) return false;
-    auto it = std::search(haystack.begin(), haystack.end(),
-                          needle.begin(), needle.end(),
-                          [](char a, char b) { return std::tolower(static_cast<unsigned char>(a))
-                                                   == std::tolower(static_cast<unsigned char>(b)); });
-    return it != haystack.end();
-}
+#include <cmath>
 
 bool AudioHandler::init() {
     mainloop.reset(pa_threaded_mainloop_new());
@@ -165,7 +153,7 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
 void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
     volume = std::clamp(volume, 0.0f, 1.0f);
     if (kc.type == "app") {
-        setVolumeForApps(kc.targets, volume);
+        setVolumeForApps(kc.targets, std::pow(volume, volumeGamma));
     } else if (kc.type == "focused") {
         if (getPID) {
             int pid = getPID();
@@ -177,7 +165,7 @@ void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
                 // same binary name in PulseAudio.
                 std::string name = getProcessName(pid);
                 if (!name.empty())
-                    setVolumeForApps({name}, volume);
+                    setVolumeForApps({name}, std::pow(volume, volumeGamma));
             }
         }
     } else if (kc.type == "system") {

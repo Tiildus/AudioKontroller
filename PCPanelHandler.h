@@ -56,7 +56,7 @@ public:
     // Minimum raw value change (0–255 scale) required to fire the knob callback.
     // Filters out electrical noise / jitter from potentiometers at rest.
     // Atomic because it's read from the HID thread in processKnobEvent().
-    std::atomic<int> knobThreshold{4};
+    std::atomic<int> knobThreshold;
 
 private:
     // HID report byte 0 values that identify knob vs button events.

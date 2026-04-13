@@ -3,7 +3,9 @@
 // =============================================================================
 
 #include "ConfigManager.h"
+#include "PCPanelHandler.h"
 #include "Logger.h"
+#include <algorithm>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -43,8 +45,14 @@ bool ConfigManager::load(const std::string& path) {
     QJsonObject root = doc.object();
 
     // Read top-level fields with sensible defaults if any key is missing.
-    config.device       = root.value("device").toString("Mini").toStdString();
-    config.knobThreshold = root.value("knobThreshold").toInt(4);
+    // Validation and clamping are applied here so consumers get clean values.
+    std::string deviceStr = root.value("device").toString("Mini").toStdString();
+    if (deviceStr == "Pro")       config.device = PCPanelDevice::Pro;
+    else if (deviceStr == "RGB")  config.device = PCPanelDevice::RGB;
+    else                          config.device = PCPanelDevice::Mini;
+    config.knobThreshold = std::clamp(root.value("knobThreshold").toInt(4), 0, 50);
+    config.volumeGamma  = static_cast<float>(root.value("volumeGamma").toDouble(0.35));
+    if (config.volumeGamma < 0.1f) config.volumeGamma = 0.1f;
     config.logFile      = root.value("logFile").toString("").toStdString();
 
     QJsonArray knobsArr = root.value("knobs").toArray();
@@ -69,6 +77,7 @@ bool ConfigManager::createDefault(const std::string& path) {
     QJsonObject root;
     root["device"]         = "Mini";
     root["knobThreshold"]  = 4;
+    root["volumeGamma"]    = 0.35;
 
     QJsonArray knobs;
     auto makeKnob = [](const QString& type, const QString& target = "") {

@@ -5,7 +5,7 @@
 //   - Which PCPanel device model to use (Mini / Pro / RGB)
 //   - What each knob controls (named app or "focused" window)
 //   - What each button does (media, key sequence, force close, none)
-//   - Dead zone threshold and optional log file path override
+//   - Dead zone threshold, volume gamma curve, and optional log file path override
 //
 // If the config file doesn't exist on first run, a sensible default is
 // generated automatically so the daemon works out of the box.
@@ -15,6 +15,10 @@
 #include <string>
 #include <vector>
 #include <QJsonObject>
+
+// Forward declaration — full definition is in PCPanelHandler.h.
+// Allows Config to store the parsed device type without pulling in HID headers.
+enum class PCPanelDevice;
 
 // Describes what one physical knob controls.
 struct KnobConfig {
@@ -45,9 +49,10 @@ struct ButtonConfig {
 
 // The complete parsed configuration.
 struct Config {
-    std::string device        = "Mini"; // PCPanel model name
-    int knobThreshold         = 4;      // minimum raw movement (0–255) to fire a callback
-    std::string logFile;  // empty = XDG default (~/.local/state/audiokontroller/)
+    PCPanelDevice device;      // PCPanel hardware variant (Mini / Pro / RGB)
+    int knobThreshold;         // minimum raw movement (0–255) to fire a callback (clamped 0–50)
+    float volumeGamma;         // gamma curve for app/focused volume (not system); min 0.1, default 0.35
+    std::string logFile;       // empty = XDG default (~/.local/state/audiokontroller/)
     std::vector<KnobConfig>   knobs;
     std::vector<ButtonConfig> buttons;
 };
