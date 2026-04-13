@@ -170,7 +170,7 @@ Three structs represent the parsed configuration:
 - `keys` — a human-readable key combo string like `"ctrl+grave"` (for `sendKeys`)
 - `args` — raw ydotool command arguments as an alternative to `keys` (for advanced users)
 
-**`Config`** is the top-level container holding the device model name, knob dead-zone threshold, log file path, and the lists of knob and button configs.
+**`Config`** is the top-level container holding the device variant enum, knob dead-zone threshold, volume gamma curve exponent, log file path, and the lists of knob and button configs.
 
 ### Loading and Parsing
 
@@ -178,7 +178,7 @@ Three structs represent the parsed configuration:
 
 1. Tries to open the JSON file. If it doesn't exist (first run), it calls `createDefault()` to generate a sensible starter config, then opens the newly created file.
 2. Parses the JSON using Qt's `QJsonDocument`. If parsing fails, it prints an error to stderr and returns `false`.
-3. Reads top-level fields (`device`, `knobThreshold`, and optionally `logFile`) with fallback defaults if any are missing.
+3. Reads top-level fields (`device`, `knobThreshold`, `volumeGamma`, and optionally `logFile`) with fallback defaults if any are missing. Validation and clamping (e.g., `knobThreshold` to 0–50, `volumeGamma` minimum 0.1) are applied here so consumers get clean values.
 4. Iterates through the `"knobs"` and `"buttons"` JSON arrays, passing each object to `parseKnob()` or `parseButton()`.
 
 **Why stderr instead of the Logger?** The Logger hasn't been initialized at config-load time (it depends on a successful config load), so there's nowhere else to write the error.
@@ -257,7 +257,7 @@ Button events are *not* skipped, because a button pressed during startup is alwa
 
 Potentiometers (the components inside the knobs) can produce slight fluctuations in their reported value even when physically at rest — electrical noise. Without filtering, this would cause constant tiny volume changes.
 
-The `knobThreshold` (default: 4 on a 0–255 scale) defines the minimum change required to fire a callback. The `lastValue` array tracks the most recent reported value for each knob. A new value only triggers the callback if it differs from the last by at least `knobThreshold`:
+The `knobThreshold` (default: 4 on a 0–255 scale, clamped to 0–50 by ConfigManager) defines the minimum change required to fire a callback. The `lastValue` array tracks the most recent reported value for each knob. A new value only triggers the callback if it differs from the last by at least `knobThreshold`:
 
 ```cpp
 if (prev == NO_VALUE || std::abs(value - prev) >= knobThreshold) {
@@ -333,17 +333,17 @@ Because both sides use `lock()`/`unlock()`, the shared fields (`targetApps`, `ta
 
 ### Three Types of Volume Control
 
-`handleKnob()` dispatches based on the knob's configured type:
+`handleKnob()` dispatches based on the knob's configured type. For "app" and "focused" types, a gamma curve (`std::pow(volume, volumeGamma)`) is applied before passing the volume to PulseAudio. This boosts low-end volume for more perceptually linear control — the knob position displayed on the OSD stays linear (0–100%), but the actual audio volume follows the curve. System volume is not affected by the gamma curve.
 
-**App volume (`type: "app"`):** Calls `setVolumeForApps()` with the list of target names from the config. This locks the mainloop, stores the target names and volume, then kicks off `requestSinkInputs()` — a PulseAudio operation that enumerates all active audio streams. For each stream, PulseAudio calls `sinkInputInfoCallback()`, where the code checks if any of the stream's name fields match any of the target names.
+**App volume (`type: "app"`):** Applies the gamma curve, then calls `setVolumeForApps()` with the list of target names from the config. This locks the mainloop, stores the target names and volume, then kicks off `requestSinkInputs()` — a PulseAudio operation that enumerates all active audio streams. For each stream, PulseAudio calls `sinkInputInfoCallback()`, where the code checks if any of the stream's name fields match any of the target names.
 
 The matching is intentionally fuzzy: it does a case-insensitive substring search across three PulseAudio property fields (`application.process.binary`, `application.name`, `media.name`). This means `"discord"` in your config matches a binary called `"Discord"`, an app named `"discord-canary"`, etc.
 
-**Focused window volume (`type: "focused"`):** Uses the injected `getPID()` function to get the currently focused window's PID, then reads `/proc/<pid>/comm` to get the process name. It then calls `setVolumeForApps()` with that name.
+**Focused window volume (`type: "focused"`):** Applies the gamma curve, then uses the injected `getPID()` function to get the currently focused window's PID, reads `/proc/<pid>/comm` to get the process name, and calls `setVolumeForApps()` with that name.
 
 Why resolve to a name instead of matching by PID directly? Because of **Electron/Chromium apps**. In apps like Discord, VS Code, and Slack, the window you see is owned by one process, but the audio is played by a different child process. Both processes share the same binary name (e.g., `"discord"`), so matching by name catches both. Matching by PID would only find the window process, which might not be the one playing audio.
 
-**System volume (`type: "system"`):** Calls `setSystemVolume()`, which queries the default output sink (the `@DEFAULT_SINK@` special name) and sets its volume directly. This affects all audio on the system regardless of which application is producing it.
+**System volume (`type: "system"`):** Calls `setSystemVolume()` directly with the raw linear volume (no gamma curve). This queries the default output sink (the `@DEFAULT_SINK@` special name) and sets its volume. System volume affects all audio regardless of which application is producing it.
 
 ### Volume Representation
 
@@ -605,9 +605,10 @@ Order matters for two reasons:
 ```cpp
 button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
 audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
+audio.volumeGamma = cfg.volumeGamma;
 ```
 
-These lambdas capture a reference to `focusMonitor`. When ButtonHandler or AudioHandler calls `getPID()`, the lambda calls through to `focusMonitor.getPID()`. This is how the PID dependency is injected without creating a compile-time dependency between the classes.
+These lambdas capture a reference to `focusMonitor`. When ButtonHandler or AudioHandler calls `getPID()`, the lambda calls through to `focusMonitor.getPID()`. This is how the PID dependency is injected without creating a compile-time dependency between the classes. The `volumeGamma` is set from config before the HID thread starts, so no atomic synchronization is needed.
 
 ### 7. Register Signal Handlers
 
@@ -695,6 +696,7 @@ The daemon uses three threads. Understanding which code runs on which thread is 
 | `activePID` (FocusMonitor) | Main thread (D-Bus write), HID thread (read) | `std::atomic<int>` with relaxed ordering |
 | `running` (PCPanelHandler) | Signal handler (write), HID thread (read) | `std::atomic<bool>` |
 | `knobThreshold` (PCPanelHandler) | Main thread (write at startup), HID thread (read) | `std::atomic<int>` |
+| `volumeGamma` (AudioHandler) | Main thread (write at startup), HID thread (read) | Set before HID thread starts (happens-before) |
 | `targetApps`, `targetVolume` (AudioHandler) | HID thread (write), PA thread (read) | PA mainloop lock |
 | Log file (Logger) | Any thread | `std::mutex` |
 
@@ -731,16 +733,17 @@ To tie everything together, here's the complete journey of a knob event through 
    - Calls overlay.showVolume(0.702, "discord")
 
 6. AudioHandler::handleKnob() [HID thread]
-   - type == "focused", so call getPID()
+   - type == "focused", so apply gamma curve: pow(0.702, 0.35) = 0.878
+   - Call getPID()
    - getPID() lambda calls focusMonitor.getPID()
    - Returns activePID (e.g., 12345) via atomic load
 
 7. getProcessName(12345) [HID thread]
    - Reads /proc/12345/comm -> "discord"
 
-8. AudioHandler::setVolumeForApps({"discord"}, 0.702) [HID thread]
+8. AudioHandler::setVolumeForApps({"discord"}, 0.878) [HID thread]
    - Locks PA mainloop
-   - Sets targetApps = {"discord"}, targetVolume = 0.702
+   - Sets targetApps = {"discord"}, targetVolume = 0.878
    - Calls requestSinkInputs()
    - Unlocks PA mainloop
 
@@ -748,14 +751,16 @@ To tie everything together, here's the complete journey of a knob event through 
    - For each active audio stream, calls sinkInputInfoCallback()
    - Checks stream properties: application.process.binary = "discord"
    - "discord" contains "discord" (case-insensitive) -> match!
-   - Sets stream volume to 0.702 * PA_VOLUME_NORM = 46006
+   - Sets stream volume to 0.878 * PA_VOLUME_NORM = 57540
 
 10. Overlay::showVolume(0.702, "discord") [HID thread]
+    - Note: the overlay receives the raw linear value (0.702), not the gamma-curved value
     - resolveAppIcon("discord") finds com.discordapp.Discord.desktop → Icon=com.discordapp.Discord
     - Sends D-Bus mediaPlayerVolumeChanged call to KDE Plasma OSD
     - Shows "Volume: 70%" popup with Discord's icon on screen
 
-11. USER hears Discord's audio at 70% volume
+11. USER hears Discord's audio at ~88% volume (gamma-curved), while
+    the OSD shows a linear 70% matching the physical knob position
 ```
 
 ---
@@ -793,7 +798,7 @@ The user is added to the `uinput` group. A logout/login is required for group me
 The binary is built with CMake and installed to `~/.local/bin/audiokontroller` following the XDG Base Directory specification:
 
 - **Binary:** `~/.local/bin/audiokontroller`
-- **Config:** `~/.config/audiokontroller/config.json` (only copied on first install, to avoid overwriting user edits)
+- **Config:** `~/.config/audiokontroller/config.json` (auto-generated on first run by the daemon if it doesn't exist)
 - **Logs/state:** `~/.local/state/audiokontroller/`
 
 ### systemd Service
@@ -836,7 +841,7 @@ The `audiokontroller` binary doubles as both daemon and CLI. When invoked with a
 
 1. Add a new entry to the `PCPanelDevice` enum in `PCPanelHandler.h`
 2. Add the VID/PID in `PCPanelHandler::getVidPid()`
-3. Add the string mapping in `main.cpp`'s `deviceFromString()`
+3. Add the string-to-enum mapping in `ConfigManager::load()` (where the device string is parsed)
 4. Add udev rules in `install.sh`
 
 ### Key Safety Rules
@@ -859,8 +864,7 @@ The `audiokontroller` binary doubles as both daemon and CLI. When invoked with a
 | `FocusMonitor.h/cpp` | 77 + 170 | KWin focus tracking via D-Bus |
 | `ButtonHandler.h/cpp` | 58 + 251 | Button action execution |
 | `Overlay.h/cpp` | 24 + 130 | KDE OSD volume display |
-| `Util.h` | 13 | Shared `/proc/<pid>/comm` helper |
-| `config.json` | 16 | Runtime configuration |
+| `Util.h` | 62 | XDG paths, process lookup, string utilities |
 | `CMakeLists.txt` | 48 | Build configuration |
 | `install.sh` | 144 | Installation and deployment |
 | `uninstall.sh` | 88 | Uninstallation |
