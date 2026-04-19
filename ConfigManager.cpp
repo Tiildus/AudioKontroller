@@ -54,6 +54,8 @@ bool ConfigManager::load(const std::string& path) {
     config.volumeGamma  = static_cast<float>(root.value("volumeGamma").toDouble(0.35));
     if (config.volumeGamma < 0.1f) config.volumeGamma = 0.1f;
     config.logFile      = root.value("logFile").toString("").toStdString();
+    config.discordClientId     = root.value("discordClientId").toString("").toStdString();
+    config.discordClientSecret = root.value("discordClientSecret").toString("").toStdString();
 
     QJsonArray knobsArr = root.value("knobs").toArray();
     config.knobs.clear();
@@ -79,6 +81,12 @@ bool ConfigManager::createDefault(const std::string& path) {
     root["knobThreshold"]  = 4;
     root["volumeGamma"]    = 0.35;
 
+    // Discord IPC credentials. Leave empty unless you've registered an
+    // application at https://discord.com/developers and want to use the
+    // "discordMute" button action.
+    root["discordClientId"]     = "";
+    root["discordClientSecret"] = "";
+
     QJsonArray knobs;
     auto makeKnob = [](const QString& type, const QString& target = "") {
         QJsonObject obj;
@@ -99,10 +107,9 @@ bool ConfigManager::createDefault(const std::string& path) {
         buttons.append(b);
     }
     {
-        // Example: Ctrl+` combo using human-readable key names
+        // Toggle Discord mic mute. Requires discordClientId/Secret above.
         QJsonObject b;
-        b["action"] = "sendKeys";
-        b["keys"] = "ctrl+grave";
+        b["action"] = "discordMute";
         buttons.append(b);
     }
     {
@@ -151,16 +158,8 @@ KnobConfig ConfigManager::parseKnob(const QJsonObject& obj) {
 }
 
 // Parses a single button entry from its JSON object.
-// "keys" is a human-readable combo string (e.g. "ctrl+grave").
-// "args" is the raw ydotool arguments fallback (e.g. ["key", "29:1", ...]).
-// If both are present, "keys" takes priority.
 ButtonConfig ConfigManager::parseButton(const QJsonObject& obj) {
     ButtonConfig b;
     b.action = obj.value("action").toString("none").toStdString();
-    b.keys = obj.value("keys").toString("").toStdString();
-    QJsonArray argsArr = obj.value("args").toArray();
-    for (const auto& a : argsArr) {
-        b.args.push_back(a.toString().toStdString());
-    }
     return b;
 }

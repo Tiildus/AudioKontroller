@@ -36,15 +36,9 @@ struct KnobConfig {
 // Describes what one physical button does when pressed.
 struct ButtonConfig {
     std::string action;              // "mediaPlayPause" — toggle play/pause via playerctl
-                                     // "sendKeys"       — send a key sequence via ydotool
+                                     // "discordMute"    — toggle Discord mic mute via IPC
                                      // "forceClose"     — kill the focused window
                                      // "none"           — do nothing
-
-    // For "sendKeys" action, use ONE of these two fields:
-    //   "keys": "ctrl+grave"                  — human-readable key combo (recommended)
-    //   "args": ["key", "29:1", "41:1", ...]  — raw ydotool arguments (advanced)
-    std::string keys;                // friendly key combo string (e.g. "ctrl+shift+a")
-    std::vector<std::string> args;   // raw ydotool arguments (fallback)
 };
 
 // The complete parsed configuration.
@@ -53,6 +47,13 @@ struct Config {
     int knobThreshold;         // minimum raw movement (0–255) to fire a callback (clamped 0–50)
     float volumeGamma;         // gamma curve for app/focused volume (not system); min 0.1, default 0.35
     std::string logFile;       // empty = XDG default (~/.local/state/audiokontroller/)
+
+    // Discord IPC credentials. Required only if at least one button uses the
+    // "discordMute" action. Obtained by registering a free application at
+    // https://discord.com/developers — see WALKTHROUGH.md for details.
+    std::string discordClientId;
+    std::string discordClientSecret;
+
     std::vector<KnobConfig>   knobs;
     std::vector<ButtonConfig> buttons;
 };

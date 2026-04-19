@@ -10,7 +10,6 @@ CONFIG_DIR="${XDG_CONFIG_HOME:-$HOME/.config}/audiokontroller"
 STATE_DIR="${XDG_STATE_HOME:-$HOME/.local/state}/audiokontroller"
 SERVICE_DIR="$HOME/.config/systemd/user"
 SERVICE_FILE="$SERVICE_DIR/audiokontroller.service"
-YDOTOOLD_FILE="$SERVICE_DIR/ydotoold.service"
 
 echo "=== $APP_NAME uninstall ==="
 
@@ -25,14 +24,13 @@ if [ -f "$SERVICE_FILE" ]; then
     rm -f "$SERVICE_FILE"
 fi
 
-# --- Stop and remove ydotoold service (only if we created it) ---
-# The install script creates a user-level ydotoold.service only when the
-# system doesn't provide one. If it exists at the user service path, it's ours.
-if [ -f "$YDOTOOLD_FILE" ]; then
-    echo "Removing user ydotoold service (created by install.sh)..."
+# --- Clean up legacy ydotoold service (from older installs) ---
+LEGACY_YDOTOOLD="$SERVICE_DIR/ydotoold.service"
+if [ -f "$LEGACY_YDOTOOLD" ]; then
+    echo "Removing legacy ydotoold service from a previous install..."
     systemctl --user stop ydotoold.service 2>/dev/null || true
     systemctl --user disable ydotoold.service 2>/dev/null || true
-    rm -f "$YDOTOOLD_FILE"
+    rm -f "$LEGACY_YDOTOOLD"
 fi
 
 systemctl --user daemon-reload
@@ -62,7 +60,7 @@ fi
 
 # --- Remove udev rules ---
 echo "Removing udev rules..."
-sudo rm -f /etc/udev/rules.d/99-uinput.rules
+sudo rm -f /etc/udev/rules.d/99-uinput.rules    # legacy, from older installs
 sudo rm -f /etc/udev/rules.d/99-pcpanel.rules
 sudo udevadm control --reload
 sudo udevadm trigger
@@ -84,5 +82,5 @@ echo
 echo "Done! $APP_NAME has been uninstalled."
 echo
 echo "The following were NOT removed (may be used by other programs):"
-echo "  - System packages (cmake, qt6, hidapi, playerctl, ydotool, etc.)"
-echo "  - uinput group membership"
+echo "  - System packages (cmake, qt6, hidapi, playerctl, etc.)"
+echo "  - pcpanel group membership"

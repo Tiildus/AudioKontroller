@@ -12,7 +12,7 @@ set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 set(CMAKE_AUTOMOC ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core DBus)
+find_package(Qt6 REQUIRED COMPONENTS Core DBus Network)
 find_package(PkgConfig REQUIRED)
 pkg_check_modules(PULSE REQUIRED libpulse)
 pkg_check_modules(HIDAPI REQUIRED hidapi-libusb)
@@ -29,6 +29,7 @@ add_executable(audiokontroller
     Overlay.cpp Overlay.h
     FocusMonitor.cpp FocusMonitor.h
     ButtonHandler.cpp ButtonHandler.h
+    DiscordIPC.cpp DiscordIPC.h
     ConfigManager.cpp ConfigManager.h
     Logger.cpp Logger.h
     Util.h
@@ -42,6 +43,7 @@ target_link_options(audiokontroller PRIVATE
 target_link_libraries(audiokontroller
     Qt6::Core
     Qt6::DBus
+    Qt6::Network
     ${HIDAPI_LIBRARIES}
     ${PULSE_LIBRARIES}
     pthread

@@ -16,12 +16,13 @@ This document is a guided tour of the AudioKontroller codebase. It is written fo
 8. [Volume Control — AudioHandler](#8-volume-control--audiohandler)
 9. [Window Focus Tracking — FocusMonitor](#9-window-focus-tracking--focusmonitor)
 10. [Button Actions — ButtonHandler](#10-button-actions--buttonhandler)
-11. [Visual Feedback — Overlay](#11-visual-feedback--overlay)
-12. [The Entry Point — main.cpp](#12-the-entry-point--maincpp)
-13. [Threading Model](#13-threading-model)
-14. [Data Flow: From Knob Turn to Volume Change](#14-data-flow-from-knob-turn-to-volume-change)
-15. [Installation and Deployment](#15-installation-and-deployment)
-16. [Guide for Contributors](#16-guide-for-contributors)
+11. [Discord IPC Client — DiscordIPC](#11-discord-ipc-client--discordipc)
+12. [Visual Feedback — Overlay](#12-visual-feedback--overlay)
+13. [The Entry Point — main.cpp](#13-the-entry-point--maincpp)
+14. [Threading Model](#14-threading-model)
+15. [Data Flow: From Knob Turn to Volume Change](#15-data-flow-from-knob-turn-to-volume-change)
+16. [Installation and Deployment](#16-installation-and-deployment)
+17. [Guide for Contributors](#17-guide-for-contributors)
 
 ---
 
@@ -166,11 +167,9 @@ Three structs represent the parsed configuration:
   ```
 
 **`ButtonConfig`** describes what a single physical button does when pressed:
-- `action` — one of: `"mediaPlayPause"`, `"sendKeys"`, `"forceClose"`, `"none"`
-- `keys` — a human-readable key combo string like `"ctrl+grave"` (for `sendKeys`)
-- `args` — raw ydotool command arguments as an alternative to `keys` (for advanced users)
+- `action` — one of: `"mediaPlayPause"`, `"discordMute"`, `"forceClose"`, `"none"`
 
-**`Config`** is the top-level container holding the device variant enum, knob dead-zone threshold, volume gamma curve exponent, log file path, and the lists of knob and button configs.
+**`Config`** is the top-level container holding the device variant enum, knob dead-zone threshold, volume gamma curve exponent, log file path, optional Discord IPC credentials (`discordClientId` and `discordClientSecret` — only required if any button uses `"discordMute"`), and the lists of knob and button configs.
 
 ### Loading and Parsing
 
@@ -185,7 +184,7 @@ Three structs represent the parsed configuration:
 
 ### Default Config Generation
 
-`createDefault()` produces a config that works out of the box for a PCPanel Mini with a typical setup: Firefox and Discord on dedicated knobs, a focused-window knob, a system volume knob, and buttons for media play/pause, a key combo, no-op, and force-close. This means a new user can install and immediately have a working (if generic) configuration.
+`createDefault()` produces a config that works out of the box for a PCPanel Mini with a typical setup: Firefox and Discord on dedicated knobs, a focused-window knob, a system volume knob, and buttons for media play/pause, Discord mute, no-op, and force-close. The Discord-mute button does nothing until the user fills in `discordClientId` / `discordClientSecret` (see Section 11). This means a new user can install and immediately have a working (if generic) configuration.
 
 ---
 
@@ -439,22 +438,22 @@ The destructor unloads the script from KWin (so it stops calling our D-Bus servi
 
 **Files:** `ButtonHandler.h`, `ButtonHandler.cpp`
 
-ButtonHandler translates button press events into actions. Four action types are supported.
+ButtonHandler translates button press events into actions. Three action types are supported, plus a `"none"` no-op.
 
 ### Action Dispatch
 
 `handleButton()` is a simple dispatcher:
 
 ```cpp
-if (bc.action == "mediaPlayPause")     toggleMediaPlayPause();
-else if (bc.action == "sendKeys")      sendKeyCombo(bc.keys) or sendKeySequence(bc.args);
-else if (bc.action == "forceClose")    forceCloseFocusedWindow();
+if (bc.action == "mediaPlayPause")  toggleMediaPlayPause();
+else if (bc.action == "discordMute") toggleDiscordMute();
+else if (bc.action == "forceClose")  forceCloseFocusedWindow();
 // "none" does nothing
 ```
 
 ### fork/exec: Why Not `system()`?
 
-All external commands are run via `fork()` + `execvp()` instead of `std::system()`. This is a deliberate security and performance choice:
+External commands (currently just `playerctl`) are run via `fork()` + `execvp()` instead of `std::system()`. The helper lives in `Util.h` as `forkExec()` so it can be reused. This is a deliberate security and performance choice:
 
 **Security:** `std::system()` passes the command through `/bin/sh`, which interprets shell metacharacters. If a config value contained `"; rm -rf /"`, the shell would execute it. With `execvp()`, arguments are passed directly to the program with no shell interpretation — they're just strings.
 
@@ -468,22 +467,9 @@ The child uses `_exit()` instead of `exit()` if `execvp()` fails. This is import
 
 Simply runs `playerctl play-pause`. Playerctl is a command-line tool that communicates with MPRIS-compatible media players (Spotify, Firefox, VLC, etc.) via D-Bus.
 
-### Key Combos
+### Discord Mute
 
-The `sendKeyCombo()` function translates a human-readable string like `"ctrl+grave"` into the format ydotool expects. The process:
-
-1. Split the string on `+` (e.g., `"ctrl+grave"` becomes `["ctrl", "grave"]`)
-2. Trim whitespace and lowercase each token
-3. Look up each token in `keyMap` to get its Linux keycode (e.g., `ctrl` = 29, `grave` = 41)
-4. Build the ydotool command with press events in order, then release events in reverse:
-   ```
-   ydotool key 29:1 41:1 41:0 29:0
-   ```
-   The `:1` suffix means "press" and `:0` means "release". Reverse-order release is how a real keyboard works — you press modifiers first, press the key, release the key, then release modifiers.
-
-The `keyMap` is a large `unordered_map` containing ~100 entries mapping human-readable names (like `"ctrl"`, `"grave"`, `"f1"`, `"space"`) to their Linux input event keycodes from `linux/input-event-codes.h`.
-
-For advanced users, the `"args"` field in config allows passing raw ydotool arguments directly, bypassing the key name translation entirely.
+Calls `DiscordIPC::toggleMute()` on the injected `DiscordIPC*`. The handler doesn't itself know how the toggle is performed — see Section 11 for the protocol. If `setDiscordIPC()` was never called or credentials are missing, the action logs a warning and returns silently.
 
 ### Force Close
 
@@ -496,7 +482,73 @@ Before sending the signal, two safety checks run:
 
 ---
 
-## 11. Visual Feedback — Overlay
+## 11. Discord IPC Client — DiscordIPC
+
+**Files:** `DiscordIPC.h`, `DiscordIPC.cpp`
+
+DiscordIPC handles the `"discordMute"` button action by talking directly to the Discord desktop app over its local Unix-socket RPC interface. This replaces an earlier approach that used `ydotool` to synthesize a keystroke for Discord's global mute hotkey — that approach had several drawbacks (required the `ydotoold` daemon, depended on Discord's "global keybinds" being enabled and working on Wayland, and any focused app could intercept the keystroke first). Talking to Discord directly is more reliable and lets Discord's own UI reflect the muted state for everyone in the call.
+
+### The Wire Protocol
+
+Discord listens on a Unix socket at `$XDG_RUNTIME_DIR/discord-ipc-0` (with `-1` through `-9` as fallbacks if multiple Discord builds are running). Every message in either direction is framed identically:
+
+```
+[opcode : uint32 little-endian]
+[length : uint32 little-endian]   (length of the JSON body that follows)
+[json   : <length> bytes]
+```
+
+Only three opcodes matter to us: `0` HANDSHAKE, `1` FRAME (everything except handshake), and `2` CLOSE (server is dropping us).
+
+### One-Time Setup (User-Facing)
+
+Before `discordMute` works, the user must:
+
+1. Visit `https://discord.com/developers`, create a free application, and copy its `client_id` and `client_secret` into `config.json` as `discordClientId` and `discordClientSecret`.
+2. On first button press, Discord pops up "Allow `<App Name>` to access your account?" inside the Discord app. The user clicks **Authorize** once.
+
+After that, a refresh token is saved to `~/.local/state/audiokontroller/discord_token.json` and the popup never appears again — the daemon refreshes its access token transparently as needed. See [Section 4 of the README discussion in this folder] or the inline comments in `DiscordIPC.h` for the full lifecycle.
+
+### Connection and Authentication Flow
+
+`toggleMute()` is the single public entry point. On every call it ensures the IPC session is ready by walking through these steps as needed:
+
+1. **Connect** the Unix socket. Tries `discord-ipc-0` through `-9`, returns the first one that connects.
+2. **Handshake** (`{ v: 1, client_id }`).
+3. **Authenticate** with the saved access token. If Discord responds with `evt: "ERROR"`, the token has expired — refresh it via `https://discord.com/api/v10/oauth2/token` and retry once.
+4. If we have no refresh token at all, fall back to **Authorize**: send `AUTHORIZE` (Discord shows the popup), exchange the returned code for a token pair at the same OAuth endpoint, save the tokens, then re-authenticate.
+
+Once authenticated, the actual mute toggle is two messages:
+
+```
+GET_VOICE_SETTINGS  →  read current data.mute (true/false)
+SET_VOICE_SETTINGS  →  args.mute = !current
+```
+
+### Why a Local QEventLoop?
+
+The OAuth code-exchange and refresh flows need an HTTPS POST. We use `QNetworkAccessManager` because Qt is already a dependency. `QNetworkAccessManager` is asynchronous (signals-based), but `toggleMute()` is called from the HID thread and we want a synchronous answer before the socket reads continue. The trick is a private `QEventLoop` inside `postToken()`:
+
+```cpp
+QEventLoop loop;
+QNetworkReply* reply = mgr.post(req, body);
+QObject::connect(reply, &QNetworkReply::finished, &loop, &QEventLoop::quit);
+loop.exec();  // blocks this thread until the reply arrives
+```
+
+This drives the network request on the calling thread without involving the main Qt event loop.
+
+### Token File Permissions
+
+The refresh token is functionally a long-lived password, so the file must be user-only readable. `saveTokens()` writes it atomically: `open()` a `.tmp` file with `O_CREAT | O_EXCL` and mode `0600`, write the JSON, then `rename(2)` over the destination. Using POSIX `open()` with the mode set at creation time (rather than `QFile` followed by a separate `setPermissions()` call) avoids the brief window where the file would otherwise exist at the umask default (typically 0644, world-readable) before being tightened. `rename` is atomic on the same filesystem, so a crash mid-write can't leave a half-written or world-readable token file behind.
+
+### What Happens When Discord Isn't Running
+
+`connectSocket()` will fail to find any IPC socket and log a warning. `toggleMute()` returns false; ButtonHandler logs that the toggle failed; nothing else in the daemon is affected. The next button press will simply try again — there's no persistent failure state to clear.
+
+---
+
+## 12. Visual Feedback — Overlay
 
 **Files:** `Overlay.h`, `Overlay.cpp`
 
@@ -545,7 +597,7 @@ This is because changing the system volume through PulseAudio already triggers K
 
 ---
 
-## 12. The Entry Point — main.cpp
+## 13. The Entry Point — main.cpp
 
 `main.cpp` is the orchestrator. It constructs all components, wires them together, and manages the application lifecycle. Here's the sequence, step by step:
 
@@ -566,7 +618,7 @@ sa_chld.sa_flags = SA_NOCLDWAIT;
 sigaction(SIGCHLD, &sa_chld, nullptr);
 ```
 
-When ButtonHandler spawns child processes (playerctl, ydotool), it never calls `wait()`. Without `SA_NOCLDWAIT`, finished children would linger as zombies. This flag tells the kernel to reap them automatically.
+When ButtonHandler spawns child processes (currently just `playerctl`), it never calls `wait()`. Without `SA_NOCLDWAIT`, finished children would linger as zombies. This flag tells the kernel to reap them automatically.
 
 ### 3. Load Configuration
 
@@ -665,7 +717,7 @@ The main thread is now dedicated to the Qt event loop, handling D-Bus callbacks 
 
 ---
 
-## 13. Threading Model
+## 14. Threading Model
 
 The daemon uses three threads. Understanding which code runs on which thread is essential for debugging and for avoiding race conditions when making changes.
 
@@ -698,13 +750,14 @@ The daemon uses three threads. Understanding which code runs on which thread is 
 | `knobThreshold` (PCPanelHandler) | Main thread (write at startup), HID thread (read) | `std::atomic<int>` |
 | `volumeGamma` (AudioHandler) | Main thread (write at startup), HID thread (read) | Set before HID thread starts (happens-before) |
 | `targetApps`, `targetVolume` (AudioHandler) | HID thread (write), PA thread (read) | PA mainloop lock |
+| Discord socket / tokens (DiscordIPC) | HID thread only | None — single-threaded use |
 | Log file (Logger) | Any thread | `std::mutex` |
 
 **Why relaxed ordering for `activePID`?** The PID is a single integer that doesn't guard any other data. We don't need happens-before guarantees — we just need the read to eventually see the write. Relaxed ordering is the cheapest atomic operation and is sufficient here.
 
 ---
 
-## 14. Data Flow: From Knob Turn to Volume Change
+## 15. Data Flow: From Knob Turn to Volume Change
 
 To tie everything together, here's the complete journey of a knob event through the system, using the "focused window" knob type as the most complex example:
 
@@ -765,7 +818,7 @@ To tie everything together, here's the complete journey of a knob event through 
 
 ---
 
-## 15. Installation and Deployment
+## 16. Installation and Deployment
 
 The `install.sh` script handles the complete setup on Fedora Linux. Understanding it helps if you need to install on a different distro or debug permission issues.
 
@@ -773,25 +826,21 @@ The `install.sh` script handles the complete setup on Fedora Linux. Understandin
 
 ```bash
 sudo dnf install -y cmake gcc-c++ qt6-qtbase-devel qt6-qttools-devel \
-    pulseaudio-libs-devel hidapi-devel pkgconf-pkg-config playerctl ydotool
+    pulseaudio-libs-devel hidapi-devel pkgconf-pkg-config playerctl
 ```
 
-These are the build-time and runtime dependencies. On non-Fedora distros, package names will differ.
+These are the build-time and runtime dependencies. Qt Network (used by `DiscordIPC` for the OAuth token-exchange POST) is included in `qt6-qtbase-devel` on Fedora — no separate package needed. On non-Fedora distros, package names will differ.
 
 ### USB Permissions (udev Rules)
 
-By default, only root can access USB HID devices. The install script creates udev rules that grant access to the `uinput` group:
+By default, only root can access USB HID devices. The install script creates udev rules that grant access to the `pcpanel` group:
 
 ```
-SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", GROUP="uinput", MODE="0660"
-SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c4", GROUP="uinput", MODE="0660"
+SUBSYSTEM=="usb", ATTR{idVendor}=="0483", ATTR{idProduct}=="a3c4", GROUP="pcpanel", MODE="0660"
+SUBSYSTEM=="hidraw", ATTRS{idVendor}=="0483", ATTRS{idProduct}=="a3c4", GROUP="pcpanel", MODE="0660"
 ```
 
-The user is added to the `uinput` group. A logout/login is required for group membership to take effect.
-
-### ydotool Daemon
-
-`ydotool` requires a background daemon (`ydotoold`) running under the user's session. The install script creates a systemd user service for it. ydotool is used by ButtonHandler's `sendKeys` action to simulate keyboard input.
+The user is added to the `pcpanel` group. A logout/login is required for group membership to take effect.
 
 ### Build and Install
 
@@ -805,7 +854,7 @@ The binary is built with CMake and installed to `~/.local/bin/audiokontroller` f
 
 A user-level systemd service is created at `~/.config/systemd/user/audiokontroller.service`. Key settings:
 
-- `After=graphical-session.target ydotoold.service` — ensures the graphical session and ydotool daemon are up first
+- `After=graphical-session.target` — ensures the graphical session is up first
 - `Restart=on-failure` — automatically restarts if the daemon crashes
 - `NoNewPrivileges=yes` — prevents privilege escalation
 - `ProtectSystem=strict` — makes the entire filesystem read-only except explicitly allowed paths
@@ -821,7 +870,7 @@ The `audiokontroller` binary doubles as both daemon and CLI. When invoked with a
 
 ---
 
-## 16. Guide for Contributors
+## 17. Guide for Contributors
 
 ### Adding a New Knob Type
 
@@ -834,8 +883,9 @@ The `audiokontroller` binary doubles as both daemon and CLI. When invoked with a
 
 1. Add the new action string to `ButtonConfig::action` documentation in `ConfigManager.h`
 2. Add a new `else if` branch in `ButtonHandler::handleButton()`
-3. Implement the action method. If it runs an external program, use `forkExec()`
+3. Implement the action method. If it runs an external program, use `forkExec()` from `Util.h`
 4. If it needs the focused window PID, use the injected `getPID()` function
+5. If it needs to talk to a long-lived external service (like `DiscordIPC`), inject the client through a setter on `ButtonHandler` rather than constructing it inside the action — that keeps the class decoupled and the lifetime owned by `main.cpp`.
 
 ### Adding a New Device Variant
 
@@ -856,15 +906,16 @@ The `audiokontroller` binary doubles as both daemon and CLI. When invoked with a
 
 | File | Lines | Role |
 |------|-------|------|
-| `main.cpp` | 225 | Entry point, wiring, lifecycle |
-| `ConfigManager.h/cpp` | 75 + 157 | JSON config parsing |
-| `Logger.h/cpp` | 51 + 88 | Thread-safe file logging |
-| `PCPanelHandler.h/cpp` | 99 + 151 | USB HID device input |
-| `AudioHandler.h/cpp` | 101 + 234 | PulseAudio volume control |
-| `FocusMonitor.h/cpp` | 77 + 170 | KWin focus tracking via D-Bus |
-| `ButtonHandler.h/cpp` | 58 + 251 | Button action execution |
-| `Overlay.h/cpp` | 24 + 130 | KDE OSD volume display |
-| `Util.h` | 62 | XDG paths, process lookup, string utilities |
-| `CMakeLists.txt` | 48 | Build configuration |
-| `install.sh` | 144 | Installation and deployment |
-| `uninstall.sh` | 88 | Uninstallation |
+| `main.cpp` | ~200 | Entry point, wiring, lifecycle |
+| `ConfigManager.h/cpp` | ~75 + ~155 | JSON config parsing |
+| `Logger.h/cpp` | ~50 + ~90 | Thread-safe file logging |
+| `PCPanelHandler.h/cpp` | ~100 + ~150 | USB HID device input |
+| `AudioHandler.h/cpp` | ~100 + ~235 | PulseAudio volume control |
+| `FocusMonitor.h/cpp` | ~80 + ~170 | KWin focus tracking via D-Bus |
+| `ButtonHandler.h/cpp` | ~55 + ~115 | Button action execution |
+| `DiscordIPC.h/cpp` | ~80 + ~290 | Discord local IPC (OAuth + mute toggle) |
+| `Overlay.h/cpp` | ~25 + ~130 | KDE OSD volume display |
+| `Util.h` | ~85 | XDG paths, process lookup, fork/exec, string utilities |
+| `CMakeLists.txt` | ~50 | Build configuration |
+| `install.sh` | ~115 | Installation and deployment |
+| `uninstall.sh` | ~85 | Uninstallation |

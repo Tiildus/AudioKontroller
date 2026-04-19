@@ -13,6 +13,7 @@
 #include "Overlay.h"
 #include "FocusMonitor.h"
 #include "ButtonHandler.h"
+#include "DiscordIPC.h"
 #include "ConfigManager.h"
 #include "Logger.h"
 #include "Util.h"
@@ -84,7 +85,7 @@ int main(int argc, char *argv[]) {
     // to fire its retry timer.
     QCoreApplication app(argc, argv);
 
-    // When ButtonHandler spawns child processes (playerctl, ydotool) via
+    // When ButtonHandler spawns child processes (playerctl) via
     // fork/exec, we need to prevent them from becoming zombies.
     // SA_NOCLDWAIT tells the kernel to discard child exit status automatically
     // instead of keeping it until the parent calls wait().
@@ -121,9 +122,15 @@ int main(int argc, char *argv[]) {
     ButtonHandler button;
     FocusMonitor focusMonitor; // registers D-Bus service, loads KWin script
 
+    // Discord IPC client — only meaningful if credentials are set in config.
+    // The client connects lazily on first toggleMute() call, so constructing
+    // it here is cheap and never blocks startup if Discord isn't running.
+    DiscordIPC discord(cfg.discordClientId, cfg.discordClientSecret);
+
     // Inject FocusMonitor's PID lookup into ButtonHandler and AudioHandler so they
     // can access the focused window's PID without depending on FocusMonitor directly.
     button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
+    button.setDiscordIPC(&discord);
     audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
     audio.volumeGamma = cfg.volumeGamma;
 
@@ -143,6 +150,7 @@ int main(int argc, char *argv[]) {
     Logger::instance().info("Main", std::string("PCPanel: ") + (panel.isConnected() ? "connected" : "not found"));
     Logger::instance().info("Main", std::string("PulseAudio: ") + (audio.isConnected() ? "connected" : "unavailable"));
     Logger::instance().info("Main", std::string("FocusMonitor: ") + (focusMonitor.isScriptLoaded() ? "active" : "pending/failed"));
+    Logger::instance().info("Main", std::string("DiscordIPC: ") + (discord.isConfigured() ? "configured" : "not configured"));
 
     // Flush startup messages so they're visible immediately in the log.
     // Normal runtime INFO messages stay buffered for performance.

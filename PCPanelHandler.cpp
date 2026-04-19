@@ -19,7 +19,7 @@ PCPanelHandler::PCPanelHandler(PCPanelDevice deviceType) {
     getVidPid(deviceType, vid, pid);
 
     // Open the device by vendor ID + product ID. nullptr = any serial number.
-    // This will fail if the user isn't in the "uinput" group or if the udev
+    // This will fail if the user isn't in the "pcpanel" group or if the udev
     // rules haven't been applied (see install.sh).
     device.reset(hid_open(vid, pid, nullptr));
     if (!device) {

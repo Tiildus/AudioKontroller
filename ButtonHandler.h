@@ -1,23 +1,31 @@
 // =============================================================================
 // ButtonHandler.h — Executes actions triggered by PCPanel button presses
 //
-// All actions that need to run an external program use fork/exec rather than
-// std::system(). This avoids:
-//   - Shell injection: std::system() passes the command through /bin/sh, so
-//     any shell metacharacters in config values could execute arbitrary code.
-//   - Blocking: std::system() waits for the child to finish; fork/exec lets
-//     the parent return immediately so the HID read loop keeps running.
+// Three actions are supported:
+//   - "mediaPlayPause" : toggle Play/Pause via playerctl (MPRIS over D-Bus)
+//   - "discordMute"    : toggle Discord's mic mute via Discord's local IPC
+//                        socket. No synthetic keystroke, no ydotool — the
+//                        mute is set inside Discord, so other call members
+//                        see the muted icon update normally.
+//   - "forceClose"     : SIGTERM the focused window's process (with a
+//                        blocklist of protected system processes).
 //
-// The "focused window" PID is injected via setGetPIDFunc() so ButtonHandler
-// doesn't need to know about FocusMonitor directly (keeps dependencies clean).
+// External programs (currently just playerctl) are launched via the
+// fork/exec helper in Util.h to avoid shell-injection risk and to keep
+// the HID thread non-blocking.
+//
+// Two dependencies are injected so this class doesn't need to know about
+// FocusMonitor or DiscordIPC directly:
+//   - getPID()  : returns the focused window's PID (used by forceClose)
+//   - DiscordIPC : the live IPC client (used by discordMute)
 // =============================================================================
 
 #pragma once
 #include "ConfigManager.h"
-#include <unordered_map>
-#include <vector>
-#include <string>
 #include <functional>
+#include <string>
+
+class DiscordIPC;
 
 class ButtonHandler {
 public:
@@ -26,33 +34,23 @@ public:
     // Injects a function that returns the focused window's PID.
     void setGetPIDFunc(std::function<int()> func) { getPID = func; }
 
+    // Injects the Discord IPC client. May be nullptr; in that case the
+    // "discordMute" action logs a warning and does nothing.
+    void setDiscordIPC(DiscordIPC* ipc) { discord = ipc; }
+
     void handleButton(const ButtonConfig& bc);
 
     // Toggles media playback (uses playerctl).
     void toggleMediaPlayPause();
 
-    // Sends a key sequence using ydotool. "args" is passed directly as
-    // ydotool arguments (e.g. {"key", "29:1", "41:1", "41:0", "29:0"}).
-    void sendKeySequence(const std::vector<std::string>& args);
-
-    // Translates a human-readable key combo like "ctrl+grave" into the
-    // ydotool key code:state arguments and executes it.
-    void sendKeyCombo(const std::string& combo);
+    // Toggles Discord's mic mute via the IPC client.
+    void toggleDiscordMute();
 
     // Checks the focused process against a blocklist of protected system
     // processes (KDE, Wayland, audio stack, etc.). If safe, sends SIGTERM.
     void forceCloseFocusedWindow();
 
 private:
-    // Holds the injected PID-lookup function. May be empty if not set.
     std::function<int()> getPID;
-
-    // Forks a child process and immediately exec's the given command.
-    // The parent returns without waiting — fire-and-forget.
-    // argv[0] is the program name; remaining elements are its arguments.
-    static void forkExec(const std::vector<std::string>& argv);
-
-    // Maps human-readable key names (lowercase) to Linux input event keycodes.
-    // These codes come from linux/input-event-codes.h and are what ydotool expects.
-    static const std::unordered_map<std::string, int> keyMap;
+    DiscordIPC* discord = nullptr;
 };

@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <string>
+#include <vector>
 #include <unistd.h>
 
 // --- XDG Base Directory helpers ---
@@ -54,6 +55,26 @@ inline std::string getProcessName(int pid) {
     std::string name;
     std::getline(f, name);
     return name;
+}
+
+// Spawns an external program via fork/exec. Fire-and-forget — the parent
+// returns immediately without waiting. Avoids std::system() because:
+//   - std::system() runs through /bin/sh and is vulnerable to shell injection
+//     if argv contains user-controlled strings (e.g. config values).
+//   - std::system() blocks until the child exits, which would stall the HID
+//     read loop here.
+// SA_NOCLDWAIT (set in main.cpp) reaps the child so no zombie accumulates.
+// _exit() is used in the child (not exit()) to avoid flushing the parent's
+// stdio buffers or running its destructors.
+inline void forkExec(const std::vector<std::string>& argv) {
+    pid_t pid = fork();
+    if (pid == 0) {
+        std::vector<const char*> args;
+        for (const auto& a : argv) args.push_back(a.c_str());
+        args.push_back(nullptr);
+        execvp(args[0], const_cast<char* const*>(args.data()));
+        _exit(127); // 127 is the conventional "command not found" exit code
+    }
 }
 
 // Case-insensitive substring check: returns true if haystack contains needle
