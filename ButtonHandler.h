@@ -4,9 +4,9 @@
 // Three actions are supported:
 //   - "mediaPlayPause" : toggle Play/Pause via playerctl (MPRIS over D-Bus)
 //   - "discordMute"    : toggle Discord's mic mute via Discord's local IPC
-//                        socket. No synthetic keystroke, no ydotool — the
-//                        mute is set inside Discord, so other call members
-//                        see the muted icon update normally.
+//                        socket. Because the mute is set inside Discord
+//                        itself, other call members see the muted icon
+//                        update and the state survives app focus changes.
 //   - "forceClose"     : SIGTERM the focused window's process (with a
 //                        blocklist of protected system processes).
 //

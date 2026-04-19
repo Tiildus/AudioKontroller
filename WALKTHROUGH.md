@@ -655,12 +655,13 @@ Order matters for two reasons:
 ### 6. Inject Dependencies
 
 ```cpp
-button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
-audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
+auto getFocusedPID = [&focusMonitor]() { return focusMonitor.getPID(); };
+button.setGetPIDFunc(getFocusedPID);
+audio.setGetPIDFunc(getFocusedPID);
 audio.volumeGamma = cfg.volumeGamma;
 ```
 
-These lambdas capture a reference to `focusMonitor`. When ButtonHandler or AudioHandler calls `getPID()`, the lambda calls through to `focusMonitor.getPID()`. This is how the PID dependency is injected without creating a compile-time dependency between the classes. The `volumeGamma` is set from config before the HID thread starts, so no atomic synchronization is needed.
+The lambda captures a reference to `focusMonitor` and is shared between both consumers. When ButtonHandler or AudioHandler calls `getPID()`, the lambda calls through to `focusMonitor.getPID()`. This is how the PID dependency is injected without creating a compile-time dependency between the classes. The `volumeGamma` is set from config before the HID thread starts, so no atomic synchronization is needed.
 
 ### 7. Register Signal Handlers
 

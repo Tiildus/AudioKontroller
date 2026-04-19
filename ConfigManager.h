@@ -41,12 +41,13 @@ struct ButtonConfig {
                                      // "none"           — do nothing
 };
 
-// The complete parsed configuration.
+// The complete parsed configuration. Primitive fields have sensible defaults
+// so the struct is always in a valid state even before load() fills it in.
 struct Config {
-    PCPanelDevice device;      // PCPanel hardware variant (Mini / Pro / RGB)
-    int knobThreshold;         // minimum raw movement (0–255) to fire a callback (clamped 0–50)
-    float volumeGamma;         // gamma curve for app/focused volume (not system); min 0.1, default 0.35
-    std::string logFile;       // empty = XDG default (~/.local/state/audiokontroller/)
+    PCPanelDevice device;           // PCPanel hardware variant (Mini / Pro / RGB) — set by load()
+    int   knobThreshold = 4;        // minimum raw movement (0–255) to fire a callback (clamped 0–50)
+    float volumeGamma   = 0.35f;    // gamma curve for app/focused volume (not system); min 0.1
+    std::string logFile;            // empty = XDG default (~/.local/state/audiokontroller/)
 
     // Discord IPC credentials. Required only if at least one button uses the
     // "discordMute" action. Obtained by registering a free application at

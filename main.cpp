@@ -129,9 +129,10 @@ int main(int argc, char *argv[]) {
 
     // Inject FocusMonitor's PID lookup into ButtonHandler and AudioHandler so they
     // can access the focused window's PID without depending on FocusMonitor directly.
-    button.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
+    auto getFocusedPID = [&focusMonitor]() { return focusMonitor.getPID(); };
+    button.setGetPIDFunc(getFocusedPID);
     button.setDiscordIPC(&discord);
-    audio.setGetPIDFunc([&focusMonitor]() { return focusMonitor.getPID(); });
+    audio.setGetPIDFunc(getFocusedPID);
     audio.volumeGamma = cfg.volumeGamma;
 
     PCPanelHandler panel(cfg.device);

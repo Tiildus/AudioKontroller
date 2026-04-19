@@ -39,7 +39,9 @@ public:
     // System volume is unaffected (always linear).
     // < 1.0 boosts low-end volume (more perceptually linear), 1.0 = linear.
     // Set once at startup before HID thread starts, so no atomic needed.
-    float volumeGamma;
+    // The default mirrors ConfigManager's fallback so the field is well-defined
+    // even if a future caller forgets to assign it.
+    float volumeGamma = 0.35f;
 
     // Dispatches a knob event based on the knob's config type.
     // Applies the volumeGamma curve to "app" and "focused" types only.

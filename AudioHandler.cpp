@@ -152,24 +152,31 @@ void AudioHandler::sinkInputInfoCallback(pa_context*, const pa_sink_input_info* 
 
 void AudioHandler::handleKnob(const KnobConfig& kc, float volume) {
     volume = std::clamp(volume, 0.0f, 1.0f);
-    if (kc.type == "app") {
-        setVolumeForApps(kc.targets, std::pow(volume, volumeGamma));
-    } else if (kc.type == "focused") {
-        if (getPID) {
-            int pid = getPID();
-            if (pid > 0) {
-                // Resolve the focused window's PID to a process name and match
-                // by name instead of PID. This handles Electron/Chromium apps
-                // (Discord, VS Code, etc.) where the window-owning process and
-                // the audio-playing process are different PIDs but share the
-                // same binary name in PulseAudio.
-                std::string name = getProcessName(pid);
-                if (!name.empty())
-                    setVolumeForApps({name}, std::pow(volume, volumeGamma));
-            }
-        }
-    } else if (kc.type == "system") {
+
+    // System volume is routed to the default sink untouched so the OS-level
+    // OSD and hardware mute LEDs stay in sync with the raw slider position.
+    if (kc.type == "system") {
         setSystemVolume(volume);
+        return;
+    }
+
+    // App + focused both apply the perceptual-linearity gamma curve.
+    const float curved = std::pow(volume, volumeGamma);
+
+    if (kc.type == "app") {
+        setVolumeForApps(kc.targets, curved);
+        return;
+    }
+
+    if (kc.type == "focused" && getPID) {
+        int pid = getPID();
+        if (pid <= 0) return;
+        // Resolve the focused window's PID to a process name and match by name
+        // instead of PID. This handles Electron/Chromium apps (Discord, VS Code,
+        // etc.) where the window-owning process and the audio-playing process
+        // are different PIDs but share the same binary name in PulseAudio.
+        std::string name = getProcessName(pid);
+        if (!name.empty()) setVolumeForApps({name}, curved);
     }
 }
 

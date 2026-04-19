@@ -24,15 +24,6 @@ if [ -f "$SERVICE_FILE" ]; then
     rm -f "$SERVICE_FILE"
 fi
 
-# --- Clean up legacy ydotoold service (from older installs) ---
-LEGACY_YDOTOOLD="$SERVICE_DIR/ydotoold.service"
-if [ -f "$LEGACY_YDOTOOLD" ]; then
-    echo "Removing legacy ydotoold service from a previous install..."
-    systemctl --user stop ydotoold.service 2>/dev/null || true
-    systemctl --user disable ydotoold.service 2>/dev/null || true
-    rm -f "$LEGACY_YDOTOOLD"
-fi
-
 systemctl --user daemon-reload
 
 # --- Remove binary ---
@@ -60,7 +51,6 @@ fi
 
 # --- Remove udev rules ---
 echo "Removing udev rules..."
-sudo rm -f /etc/udev/rules.d/99-uinput.rules    # legacy, from older installs
 sudo rm -f /etc/udev/rules.d/99-pcpanel.rules
 sudo udevadm control --reload
 sudo udevadm trigger
